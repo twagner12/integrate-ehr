@@ -1,12 +1,26 @@
 import { requireAuth, getAuth } from '@clerk/express';
 
-// Protect any route - redirects or 401s if not logged in
+// Protect any route - 401 if not logged in
 export const requireSession = requireAuth();
 
-// Restrict to staff only (role set in Clerk publicMetadata)
-export const requireStaff = (req, res, next) => {
+// Get the role from the session token
+export const getRole = (req) => {
   const { sessionClaims } = getAuth(req);
-  if (sessionClaims?.metadata?.role !== 'staff') {
+  return sessionClaims?.metadata?.role;
+};
+
+// Restrict to admin only
+export const requireAdmin = (req, res, next) => {
+  if (getRole(req) !== 'admin') {
+    return res.status(403).json({ error: 'Admin access required' });
+  }
+  next();
+};
+
+// Restrict to staff (any role)
+export const requireStaff = (req, res, next) => {
+  const role = getRole(req);
+  if (!role) {
     return res.status(403).json({ error: 'Staff access required' });
   }
   next();
