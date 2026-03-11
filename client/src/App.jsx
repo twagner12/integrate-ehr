@@ -6,6 +6,7 @@ import Clients from './pages/Clients.jsx';
 import Calendar from './pages/Calendar.jsx';
 import Invoices from './pages/Invoices.jsx';
 import Notes from './pages/Notes.jsx';
+import Settings from './pages/Settings.jsx';
 
 function ProtectedRoute({ children }) {
   const { isSignedIn, isLoaded } = useAuth();
@@ -28,6 +29,7 @@ export default function App() {
                 <Route path="calendar" element={<Calendar />} />
                 <Route path="invoices" element={<Invoices />} />
                 <Route path="notes" element={<Notes />} />
+		<Route path="settings" element={<Settings />} />
               </Routes>
             </Layout>
           </ProtectedRoute>
