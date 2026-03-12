@@ -1,12 +1,11 @@
 import { useState, useEffect, useRef, useCallback } from 'react';
 import FullCalendar from '@fullcalendar/react';
-import { useSearchParams } from 'react-router-dom';
 import timeGridPlugin from '@fullcalendar/timegrid';
 import dayGridPlugin from '@fullcalendar/daygrid';
 import interactionPlugin from '@fullcalendar/interaction';
+import { useSearchParams } from 'react-router-dom';
 import { useApi } from '../hooks/useApi.js';
-
-// ─── Constants ────────────────────────────────────────────────────────────────
+import TimeSelect, { addMinutes, formatTime12 } from '../components/TimeSelect.jsx';
 
 const CLINICIAN_COLORS = ['#3b82f6', '#10b981', '#f59e0b', '#8b5cf6'];
 
@@ -18,28 +17,24 @@ const STATUS_COLORS = {
 };
 
 const DAYS = ['S', 'M', 'T', 'W', 'T', 'F', 'S'];
-const DAY_NAMES = ['Sunday', 'Monday', 'Tuesday', 'Wednesday', 'Thursday', 'Friday', 'Saturday'];
 
 const inputClass = "w-full border border-gray-300 rounded-lg px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-brand-400";
 const labelClass = "block text-sm font-medium text-gray-700 mb-1";
-
-// ─── Appointment Form Panel ────────────────────────────────────────────────────
 
 function AppointmentPanel({ isOpen, onClose, onSaved, initialDate, initialClinician, appointmentId, clinicians, services }) {
   const api = useApi();
   const [loading, setLoading] = useState(false);
   const [saving, setSaving] = useState(false);
   const [deleting, setDeleting] = useState(false);
-  const [clients, setClients] = useState([]);
   const [clientSearch, setClientSearch] = useState('');
   const [clientResults, setClientResults] = useState([]);
   const [searching, setSearching] = useState(false);
   const searchRef = useRef(null);
+  const searchTimeout = useRef(null);
 
   const [form, setForm] = useState({
-    client_id: '',
-    client_name: '',
-    clinician_id: initialClinician || '',
+    client_id: '', client_name: '',
+    clinician_id: '',
     service_id: '',
     date: '',
     start_time: '',
@@ -54,7 +49,6 @@ function AppointmentPanel({ isOpen, onClose, onSaved, initialDate, initialClinic
     recurrence_ends_after: 30,
   });
 
-  // Load appointment data if editing
   useEffect(() => {
     if (!isOpen) return;
     if (appointmentId) {
@@ -80,18 +74,23 @@ function AppointmentPanel({ isOpen, onClose, onSaved, initialDate, initialClinic
         setClientSearch(appt.client_name);
       }).finally(() => setLoading(false));
     } else {
-      // New appointment — set defaults from click
       const defaultService = services.find(s => s.is_default) || services[0];
       const startDate = initialDate || new Date();
       const dateStr = startDate instanceof Date
         ? startDate.toISOString().slice(0, 10)
         : startDate;
-      const timeStr = startDate instanceof Date && startDate.getHours() > 0
-        ? startDate.toTimeString().slice(0, 5)
-        : '09:00';
-      const [h, m] = timeStr.split(':').map(Number);
-      const endDate = new Date(2000, 0, 1, h, m + 50);
-      const endStr = endDate.toTimeString().slice(0, 5);
+
+      // Round click time to nearest 15 min
+      let timeStr = '09:00';
+      if (startDate instanceof Date && startDate.getHours() > 0) {
+        const h = startDate.getHours();
+        const m = Math.round(startDate.getMinutes() / 15) * 15;
+        const adjM = m === 60 ? 0 : m;
+        const adjH = m === 60 ? h + 1 : h;
+        timeStr = `${String(adjH).padStart(2, '0')}:${String(adjM).padStart(2, '0')}`;
+      }
+
+      const endStr = addMinutes(timeStr, 50);
 
       setForm(f => ({
         ...f,
@@ -113,8 +112,6 @@ function AppointmentPanel({ isOpen, onClose, onSaved, initialDate, initialClinic
     }
   }, [isOpen, appointmentId, initialDate, initialClinician]);
 
-  // Client search
-  const searchTimeout = useRef(null);
   useEffect(() => {
     if (clientSearch.length < 2) { setClientResults([]); return; }
     if (form.client_id && clientSearch === form.client_name) return;
@@ -126,29 +123,23 @@ function AppointmentPanel({ isOpen, onClose, onSaved, initialDate, initialClinic
         const q = clientSearch.toLowerCase();
         setClientResults(all.filter(c =>
           c.full_name.toLowerCase().includes(q) ||
-          c.first_name.toLowerCase().includes(q) ||
-          c.last_name.toLowerCase().includes(q)
+          c.first_name?.toLowerCase().includes(q) ||
+          c.last_name?.toLowerCase().includes(q)
         ).slice(0, 8));
       } finally { setSearching(false); }
     }, 200);
   }, [clientSearch]);
 
-  // Auto-update end time when start time changes (maintain 50min duration)
   const handleStartTimeChange = (val) => {
-    const [h, m] = val.split(':').map(Number);
-    const end = new Date(2000, 0, 1, h, m + 50);
-    const endStr = `${String(end.getHours()).padStart(2, '0')}:${String(end.getMinutes()).padStart(2, '0')}`;
+    const endStr = addMinutes(val, 50);
     setForm(f => ({ ...f, start_time: val, end_time: endStr }));
   };
 
-  // Auto-update end time when service changes
   const handleServiceChange = (serviceId) => {
     const svc = services.find(s => String(s.id) === String(serviceId));
     if (svc && form.start_time) {
-      const [h, m] = form.start_time.split(':').map(Number);
       const dur = svc.duration_minutes || 50;
-      const end = new Date(2000, 0, 1, h, m + dur);
-      const endStr = `${String(end.getHours()).padStart(2, '0')}:${String(end.getMinutes()).padStart(2, '0')}`;
+      const endStr = addMinutes(form.start_time, dur);
       setForm(f => ({ ...f, service_id: serviceId, end_time: endStr }));
     } else {
       setForm(f => ({ ...f, service_id: serviceId }));
@@ -218,12 +209,8 @@ function AppointmentPanel({ isOpen, onClose, onSaved, initialDate, initialClinic
 
   return (
     <>
-      {/* Backdrop */}
       <div className="fixed inset-0 bg-black/20 z-40" onClick={onClose} />
-
-      {/* Panel */}
       <div className="fixed right-0 top-0 h-full w-[420px] bg-white shadow-2xl z-50 flex flex-col">
-        {/* Header */}
         <div className="flex items-center justify-between px-6 py-4 border-b border-gray-200">
           <h2 className="text-base font-semibold text-gray-900">
             {appointmentId ? 'Edit appointment' : 'New appointment'}
@@ -294,11 +281,13 @@ function AppointmentPanel({ isOpen, onClose, onSaved, initialDate, initialClinic
             <div className="grid grid-cols-2 gap-3">
               <div>
                 <label className={labelClass}>Start time</label>
-                <input type="time" value={form.start_time} onChange={e => handleStartTimeChange(e.target.value)} className={inputClass} />
+                <TimeSelect value={form.start_time} onChange={handleStartTimeChange} className={inputClass} />
               </div>
               <div>
                 <label className={labelClass}>End time</label>
-                <input type="time" value={form.end_time} onChange={e => setForm(f => ({ ...f, end_time: e.target.value }))} className={inputClass} />
+                <div className="w-full border border-gray-200 rounded-lg px-3 py-2 text-sm bg-gray-50 text-gray-500">
+                  {form.end_time ? formatTime12(form.end_time) : '—'}
+                </div>
               </div>
             </div>
 
@@ -311,7 +300,7 @@ function AppointmentPanel({ isOpen, onClose, onSaved, initialDate, initialClinic
               </select>
             </div>
 
-            {/* Status (only show when editing) */}
+            {/* Status — only when editing */}
             {appointmentId && (
               <div className="grid grid-cols-2 gap-3">
                 <div>
@@ -352,7 +341,6 @@ function AppointmentPanel({ isOpen, onClose, onSaved, initialDate, initialClinic
                       className="w-14 border border-gray-300 rounded-lg px-2 py-1.5 text-sm text-center" />
                     <span className="text-gray-600">week(s)</span>
                   </div>
-
                   <div>
                     <p className="text-xs text-gray-500 mb-2">On these days</p>
                     <div className="flex gap-1">
@@ -368,7 +356,6 @@ function AppointmentPanel({ isOpen, onClose, onSaved, initialDate, initialClinic
                       ))}
                     </div>
                   </div>
-
                   <div className="flex items-center gap-2 text-sm">
                     <span className="text-gray-600">Ends after</span>
                     <input type="number" min="1" max="100" value={form.recurrence_ends_after}
@@ -390,7 +377,6 @@ function AppointmentPanel({ isOpen, onClose, onSaved, initialDate, initialClinic
           </div>
         )}
 
-        {/* Footer */}
         <div className="px-6 py-4 border-t border-gray-200 flex items-center justify-between">
           <div>
             {appointmentId && (
@@ -416,22 +402,10 @@ function AppointmentPanel({ isOpen, onClose, onSaved, initialDate, initialClinic
   );
 }
 
-// ─── Main Calendar Page ────────────────────────────────────────────────────────
-
 export default function Calendar() {
   const api = useApi();
   const calendarRef = useRef(null);
-const [searchParams, setSearchParams] = useSearchParams();
-
-useEffect(() => {
-  if (searchParams.get('new') === '1') {
-    setSelectedApptId(null);
-    setInitialDate(new Date());
-    setInitialClinician(null);
-    setPanelOpen(true);
-    setSearchParams({});
-  }
-}, [searchParams]);
+  const [searchParams, setSearchParams] = useSearchParams();
   const [clinicians, setClinicians] = useState([]);
   const [services, setServices] = useState([]);
   const [selectedClinicians, setSelectedClinicians] = useState([]);
@@ -439,29 +413,34 @@ useEffect(() => {
   const [selectedApptId, setSelectedApptId] = useState(null);
   const [initialDate, setInitialDate] = useState(null);
   const [initialClinician, setInitialClinician] = useState(null);
-  const [events, setEvents] = useState([]);
 
-  // Load clinicians and services on mount
   useEffect(() => {
     Promise.all([api.get('/clinicians'), api.get('/services')]).then(([cl, sv]) => {
       setClinicians(cl);
       setServices(sv);
-      setSelectedClinicians(cl.map(c => c.id)); // all selected by default
+      setSelectedClinicians(cl.map(c => c.id));
     });
   }, []);
 
-  // Fetch appointments for the visible date range
+  useEffect(() => {
+    if (searchParams.get('new') === '1') {
+      setSelectedApptId(null);
+      setInitialDate(new Date());
+      setInitialClinician(null);
+      setPanelOpen(true);
+      setSearchParams({});
+    }
+  }, [searchParams]);
+
   const fetchEvents = useCallback(async (fetchInfo, successCallback) => {
     try {
       const start = fetchInfo.startStr.slice(0, 10);
       const end = fetchInfo.endStr.slice(0, 10);
       const appts = await api.get(`/appointments?start=${start}&end=${end}`);
-
       const mapped = appts
         .filter(a => selectedClinicians.includes(a.clinician_id))
-        .map((a, idx) => {
+        .map(a => {
           const clinicianIdx = clinicians.findIndex(c => c.id === a.clinician_id);
-          const color = CLINICIAN_COLORS[clinicianIdx % CLINICIAN_COLORS.length];
           const statusStyle = STATUS_COLORS[a.status] || STATUS_COLORS.Show;
           const initials = `${a.clinician_first_name?.[0] || ''}${a.clinician_last_name?.[0] || ''}`;
           return {
@@ -472,7 +451,7 @@ useEffect(() => {
             backgroundColor: statusStyle.bg,
             borderColor: statusStyle.border,
             textColor: statusStyle.text,
-            extendedProps: { ...a, clinicianColor: color },
+            extendedProps: { ...a },
           };
         });
       successCallback(mapped);
@@ -504,13 +483,11 @@ useEffect(() => {
     setSelectedClinicians(prev =>
       prev.includes(id) ? prev.filter(c => c !== id) : [...prev, id]
     );
-    // Refetch after state update
     setTimeout(() => calendarRef.current?.getApi().refetchEvents(), 0);
   };
 
   return (
     <div className="h-full flex flex-col">
-      {/* Toolbar */}
       <div className="flex items-center gap-4 mb-4">
         <div className="flex items-center gap-2 flex-wrap">
           {clinicians.map((c, i) => (
@@ -521,12 +498,13 @@ useEffect(() => {
                   ? 'text-white border-transparent'
                   : 'bg-white text-gray-500 border-gray-300'
               }`}
-              style={selectedClinicians.includes(c.id) ? { backgroundColor: CLINICIAN_COLORS[i % CLINICIAN_COLORS.length], borderColor: CLINICIAN_COLORS[i % CLINICIAN_COLORS.length] } : {}}>
+              style={selectedClinicians.includes(c.id)
+                ? { backgroundColor: CLINICIAN_COLORS[i % CLINICIAN_COLORS.length], borderColor: CLINICIAN_COLORS[i % CLINICIAN_COLORS.length] }
+                : {}}>
               {c.full_name}
             </button>
           ))}
         </div>
-
         <button
           onClick={() => { setSelectedApptId(null); setInitialDate(new Date()); setInitialClinician(null); setPanelOpen(true); }}
           className="ml-auto bg-brand-500 text-white text-sm font-medium px-4 py-2 rounded-lg hover:bg-brand-600 transition-colors">
@@ -534,8 +512,7 @@ useEffect(() => {
         </button>
       </div>
 
-      {/* Calendar */}
-      <div className="flex-1 bg-white rounded-xl border border-gray-200 overflow-hidden calendar-container">
+      <div className="flex-1 bg-white rounded-xl border border-gray-200 overflow-hidden">
         <FullCalendar
           ref={calendarRef}
           plugins={[timeGridPlugin, dayGridPlugin, interactionPlugin]}
@@ -549,7 +526,6 @@ useEffect(() => {
           slotMinTime="07:00:00"
           slotMaxTime="20:00:00"
           slotDuration="00:30:00"
-          snapDuration="00:05:00"
           height="100%"
           events={fetchEvents}
           dateClick={handleDateClick}
