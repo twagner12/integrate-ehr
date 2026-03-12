@@ -5,7 +5,7 @@ import cliniciansRouter from './clinicians.js';
 import peopleRouter from './people.js';
 import appointmentsRouter from './appointments.js';
 import servicesRouter from './services.js';
-
+import notesRouter from './notes.js';
 const router = Router();
 
 router.use(requireSession);
@@ -15,6 +15,7 @@ router.use('/clinicians',   requireStaff, cliniciansRouter);
 router.use('/people',       requireStaff, peopleRouter);
 router.use('/appointments', requireStaff, appointmentsRouter);
 router.use('/services',     requireStaff, servicesRouter);
+router.use('/notes', notesRouter);
 
 router.get('/ping', (req, res) => res.json({ message: 'API ready' }));
 
