@@ -7,7 +7,8 @@ import appointmentsRouter from './appointments.js';
 import servicesRouter     from './services.js';
 import notesRouter        from './notes.js';
 import settingsRouter     from './settings.js';
-import profileRouter      from './profile.js';
+import profileRouter from './profile.js';
+import invoicesRouter  from './invoices.js';
 
 const router = Router();
 
@@ -21,6 +22,7 @@ router.use('/services',     requireStaff, servicesRouter);
 router.use('/notes',                      notesRouter);
 router.use('/settings',     requireStaff, settingsRouter);
 router.use('/profile',                    profileRouter);
+router.use('/invoices',    requireStaff, invoicesRouter);
 
 router.get('/ping', (req, res) => res.json({ message: 'API ready' }));
 

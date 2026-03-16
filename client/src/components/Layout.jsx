@@ -155,7 +155,6 @@ export default function Layout({ children }) {
     { to: '/clients',   label: 'Clients',   show: true },
     { to: '/calendar',  label: 'Calendar',  show: true },
     { to: '/notes',     label: 'Notes',     show: true },
-    { to: '/invoices',  label: 'Invoices',  show: isAdmin },
     { to: '/reports',   label: 'Reports',   show: isAdmin },
     { to: '/settings',  label: 'Settings',  show: isAdmin },
   ];

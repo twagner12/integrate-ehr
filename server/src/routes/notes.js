@@ -1,4 +1,3 @@
-import { getAuth } from '@clerk/express';
 import { Router } from 'express';
 import { getRole } from '../middleware/auth.js';
 import { db } from '../db/index.js';

@@ -28,8 +28,9 @@ export default function App() {
                 <Route path="clients/*" element={<Clients />} />
                 <Route path="calendar" element={<Calendar />} />
                 <Route path="invoices" element={<Invoices />} />
+                <Route path="invoices/:id" element={<Invoices />} />
                 <Route path="notes" element={<Notes />} />
-		<Route path="settings" element={<Settings />} />
+                <Route path="settings" element={<Settings />} />
               </Routes>
             </Layout>
           </ProtectedRoute>
