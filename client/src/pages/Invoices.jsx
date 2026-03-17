@@ -2,6 +2,9 @@ import { useState, useEffect, useCallback } from 'react';
 import { useParams, useNavigate } from 'react-router-dom';
 import { useApi } from '../hooks/useApi.js';
 import { formatPhone } from '../utils/phone.js';
+import { pdf } from '@react-pdf/renderer';
+import InvoicePdf from '../components/pdf/InvoicePdf.jsx';
+import SuperbillPdf from '../components/pdf/SuperbillPdf.jsx';
 
 function fmt(amount) { return `$${parseFloat(amount || 0).toFixed(2)}`; }
 function toISO(d) { return d.toISOString().split('T')[0]; }
@@ -166,6 +169,27 @@ function InvoiceDetail({ invoiceId, onBack, onRefresh }) {
     finally { setCreatingPayLink(false); }
   };
 
+  const handleDownloadPdf = async () => {
+    const blob = await pdf(<InvoicePdf invoice={invoice} />).toBlob();
+    const url = URL.createObjectURL(blob);
+    const a = document.createElement('a');
+    a.href = url;
+    a.download = `Invoice-${invoice.invoice_number}.pdf`;
+    a.click();
+    URL.revokeObjectURL(url);
+  };
+
+  const handleDownloadSuperbill = async () => {
+    const client = await api.get(`/clients/${invoice.client_id}`);
+    const blob = await pdf(<SuperbillPdf invoice={invoice} diagnoses={client.diagnoses || []} />).toBlob();
+    const url = URL.createObjectURL(blob);
+    const a = document.createElement('a');
+    a.href = url;
+    a.download = `Superbill-${invoice.invoice_number}.pdf`;
+    a.click();
+    URL.revokeObjectURL(url);
+  };
+
   if (loading) return <div className="text-sm text-gray-400 p-6">Loading...</div>;
   if (!invoice) return null;
   const isPaid = invoice.status === 'Paid';
@@ -269,6 +293,14 @@ function InvoiceDetail({ invoiceId, onBack, onRefresh }) {
               </button>
             </>
           )}
+          <button onClick={handleDownloadPdf}
+            className="border border-gray-300 text-gray-700 text-sm font-medium px-4 py-2 rounded-lg hover:bg-gray-50 transition-colors">
+            Invoice PDF
+          </button>
+          <button onClick={handleDownloadSuperbill}
+            className="border border-gray-300 text-gray-700 text-sm font-medium px-4 py-2 rounded-lg hover:bg-gray-50 transition-colors">
+            Superbill PDF
+          </button>
           <button onClick={() => setEditing(true)}
             className="border border-gray-300 text-gray-700 text-sm font-medium px-4 py-2 rounded-lg hover:bg-gray-50 transition-colors">
             Edit
