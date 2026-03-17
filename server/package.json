@@ -5,13 +5,18 @@
   "type": "module",
   "scripts": {
     "dev": "node --watch src/index.js",
-    "start": "node src/index.js"
+    "start": "node src/index.js",
+    "migrate": "node-pg-migrate --database-url-var DATABASE_URL --migration-file-language sql -m migrations",
+    "migrate:up": "npm run migrate -- up",
+    "migrate:down": "npm run migrate -- down",
+    "migrate:create": "npm run migrate -- create"
   },
   "dependencies": {
     "@clerk/express": "^2.0.1",
     "cors": "^2.8.5",
     "dotenv": "^16.4.5",
     "express": "^4.19.2",
+    "node-pg-migrate": "^8.0.4",
     "pg": "^8.12.0"
   }
 }
