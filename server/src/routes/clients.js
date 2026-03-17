@@ -1,5 +1,9 @@
 import { Router } from 'express';
+import { createRequire } from 'module';
 import { db } from '../db/index.js';
+
+const require = createRequire(import.meta.url);
+const icd10Codes = require('../data/icd10-slp.json');
 
 const router = Router();
 
@@ -29,6 +33,16 @@ router.get('/', async (req, res, next) => {
   } catch (err) { next(err); }
 });
 
+// GET /api/clients/icd10?q=language
+router.get('/icd10', async (req, res) => {
+  const q = (req.query.q || '').toLowerCase();
+  if (q.length < 2) return res.json([]);
+  const results = icd10Codes.filter(c =>
+    c.code.toLowerCase().includes(q) || c.description.toLowerCase().includes(q)
+  ).slice(0, 20);
+  res.json(results);
+});
+
 // GET /api/clients/:id
 router.get('/:id', async (req, res, next) => {
   try {
@@ -52,7 +66,7 @@ router.get('/:id', async (req, res, next) => {
         WHERE cc.client_id = $1
         ORDER BY cc.is_responsible_party DESC, cc.id ASC
       `, [id]),
-      db.query(`SELECT * FROM diagnoses WHERE client_id = $1 ORDER BY created_at DESC LIMIT 1`, [id]),
+      db.query(`SELECT * FROM diagnoses WHERE client_id = $1 AND removed_at IS NULL ORDER BY created_at DESC`, [id]),
       db.query(`
         SELECT a.*, cl.full_name AS clinician_name, s.cpt_code, s.description AS service_description,
           n.id AS note_id, n.subjective, n.objective, n.assessment, n.plan AS note_plan,
@@ -70,7 +84,7 @@ router.get('/:id', async (req, res, next) => {
     res.json({
       ...clientResult.rows[0],
       contacts: contacts.rows,
-      diagnosis: diagnoses.rows[0] || null,
+      diagnoses: diagnoses.rows,
       appointments: appointments.rows,
     });
   } catch (err) { next(err); }
@@ -204,6 +218,50 @@ router.delete('/:id/contacts/:linkId', async (req, res, next) => {
       'DELETE FROM client_contacts WHERE id = $1 AND client_id = $2',
       [req.params.linkId, req.params.id]
     );
+    res.json({ success: true });
+  } catch (err) { next(err); }
+});
+
+// POST /api/clients/:id/diagnosis
+router.post('/:id/diagnosis', async (req, res, next) => {
+  try {
+    const { icd10_code, description, diagnosed_at, notes } = req.body;
+    if (!icd10_code || !description) {
+      return res.status(400).json({ error: 'icd10_code and description are required' });
+    }
+    const { rows } = await db.query(`
+      INSERT INTO diagnoses (client_id, icd10_code, description, diagnosed_at, notes)
+      VALUES ($1, $2, $3, $4, $5) RETURNING *
+    `, [req.params.id, icd10_code, description, diagnosed_at || new Date(), notes || null]);
+    res.status(201).json(rows[0]);
+  } catch (err) { next(err); }
+});
+
+// PATCH /api/clients/:id/diagnosis/:diagId
+router.patch('/:id/diagnosis/:diagId', async (req, res, next) => {
+  try {
+    const { icd10_code, description, diagnosed_at, notes } = req.body;
+    const { rows } = await db.query(`
+      UPDATE diagnoses SET
+        icd10_code = COALESCE($1, icd10_code),
+        description = COALESCE($2, description),
+        diagnosed_at = COALESCE($3, diagnosed_at),
+        notes = COALESCE($4, notes)
+      WHERE id = $5 AND client_id = $6 RETURNING *
+    `, [icd10_code, description, diagnosed_at, notes, req.params.diagId, req.params.id]);
+    if (!rows[0]) return res.status(404).json({ error: 'Diagnosis not found' });
+    res.json(rows[0]);
+  } catch (err) { next(err); }
+});
+
+// DELETE /api/clients/:id/diagnosis/:diagId (soft delete)
+router.delete('/:id/diagnosis/:diagId', async (req, res, next) => {
+  try {
+    const { rows } = await db.query(`
+      UPDATE diagnoses SET removed_at = now()
+      WHERE id = $1 AND client_id = $2 AND removed_at IS NULL RETURNING *
+    `, [req.params.diagId, req.params.id]);
+    if (!rows[0]) return res.status(404).json({ error: 'Diagnosis not found' });
     res.json({ success: true });
   } catch (err) { next(err); }
 });

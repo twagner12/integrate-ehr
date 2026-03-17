@@ -424,6 +424,177 @@ function CreateInvoiceModal({ client, onClose, onCreated }) {
 }
 
 // ── Invoice list for sidebar ──────────────────────────────────────────────────
+function DiagnosisForm({ diag, clientId, onSaved, onCancel }) {
+  const api = useApi();
+  const [codeInput, setCodeInput] = useState(diag?.icd10_code || '');
+  const [results, setResults] = useState([]);
+  const [searching, setSearching] = useState(false);
+  const [saving, setSaving] = useState(false);
+  const [showDropdown, setShowDropdown] = useState(false);
+  const [highlightIdx, setHighlightIdx] = useState(-1);
+  const searchTimeout = useRef(null);
+  const dropdownRef = useRef(null);
+
+  const [form, setForm] = useState({
+    icd10_code: diag?.icd10_code || '',
+    description: diag?.description || '',
+    diagnosed_at: diag?.diagnosed_at ? new Date(diag.diagnosed_at).toISOString().slice(0, 16) : new Date().toISOString().slice(0, 16),
+    notes: diag?.notes || '',
+  });
+
+  useEffect(() => {
+    if (codeInput.length < 2) { setResults([]); setShowDropdown(false); return; }
+    clearTimeout(searchTimeout.current);
+    setSearching(true);
+    searchTimeout.current = setTimeout(async () => {
+      try {
+        const rows = await api.get(`/clients/icd10?q=${encodeURIComponent(codeInput)}`);
+        setResults(rows);
+        setShowDropdown(rows.length > 0);
+        setHighlightIdx(-1);
+      } finally { setSearching(false); }
+    }, 200);
+  }, [codeInput]);
+
+  useEffect(() => {
+    const handler = (e) => { if (!dropdownRef.current?.contains(e.target)) setShowDropdown(false); };
+    document.addEventListener('mousedown', handler);
+    return () => document.removeEventListener('mousedown', handler);
+  }, []);
+
+  const selectCode = (code) => {
+    setForm(f => ({ ...f, icd10_code: code.code, description: code.description }));
+    setCodeInput(code.code);
+    setShowDropdown(false);
+    setResults([]);
+    setHighlightIdx(-1);
+  };
+
+  const handleKeyDown = (e) => {
+    if (!showDropdown || results.length === 0) return;
+    if (e.key === 'ArrowDown') { e.preventDefault(); setHighlightIdx(i => (i + 1) % results.length); }
+    else if (e.key === 'ArrowUp') { e.preventDefault(); setHighlightIdx(i => (i - 1 + results.length) % results.length); }
+    else if (e.key === 'Enter' && highlightIdx >= 0) { e.preventDefault(); selectCode(results[highlightIdx]); }
+    else if (e.key === 'Escape') { setShowDropdown(false); }
+  };
+
+  const handleSave = async () => {
+    if (!form.icd10_code || !form.description) { alert('Select a diagnosis code.'); return; }
+    setSaving(true);
+    try {
+      if (diag?.id) {
+        await api.patch(`/clients/${clientId}/diagnosis/${diag.id}`, form);
+      } else {
+        await api.post(`/clients/${clientId}/diagnosis`, form);
+      }
+      onSaved();
+    } catch (err) { alert(err.message); }
+    finally { setSaving(false); }
+  };
+
+  return (
+    <div className="space-y-3 pt-3 border-t border-gray-100">
+      <div className="relative" ref={dropdownRef}>
+        <label className="block text-xs font-medium text-gray-500 mb-1">Diagnosis code</label>
+        <input type="text" placeholder="Search ICD-10 codes..." value={codeInput}
+          onChange={e => { setCodeInput(e.target.value); if (!e.target.value) setForm(f => ({ ...f, icd10_code: '', description: '' })); }}
+          onKeyDown={handleKeyDown}
+          className="w-full border border-gray-300 rounded-lg px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-brand-400" />
+        {searching && <p className="text-xs text-gray-400 mt-1">Searching...</p>}
+        {showDropdown && (
+          <div className="absolute z-10 w-full mt-1 border border-gray-200 rounded-lg bg-white shadow-lg max-h-48 overflow-y-auto">
+            {results.map((c, i) => (
+              <button key={c.code} onMouseDown={() => selectCode(c)}
+                className={`w-full text-left px-3 py-2 text-sm border-b border-gray-50 last:border-0 ${i === highlightIdx ? 'bg-brand-50 text-brand-700' : 'hover:bg-gray-50'}`}>
+                <span className="font-medium">{c.code}</span>
+                <span className={`ml-2 ${i === highlightIdx ? 'text-brand-500' : 'text-gray-500'}`}>{c.description}</span>
+              </button>
+            ))}
+          </div>
+        )}
+      </div>
+      <div>
+        <label className="block text-xs font-medium text-gray-500 mb-1">Description</label>
+        <input type="text" value={form.description} onChange={e => setForm(f => ({ ...f, description: e.target.value }))}
+          className="w-full border border-gray-300 rounded-lg px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-brand-400" placeholder="Diagnosis description" />
+      </div>
+      <div>
+        <label className="block text-xs font-medium text-gray-500 mb-1">Date and time of diagnosis</label>
+        <input type="datetime-local" value={form.diagnosed_at} onChange={e => setForm(f => ({ ...f, diagnosed_at: e.target.value }))}
+          className="w-full border border-gray-300 rounded-lg px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-brand-400" />
+      </div>
+      <div>
+        <label className="block text-xs font-medium text-gray-500 mb-1">Treatment plan notes</label>
+        <textarea value={form.notes} onChange={e => setForm(f => ({ ...f, notes: e.target.value }))} rows={2} placeholder="Optional"
+          className="w-full border border-gray-300 rounded-lg px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-brand-400 resize-none" />
+      </div>
+      <div className="flex gap-2 pt-1">
+        <button onClick={handleSave} disabled={saving}
+          className="bg-brand-500 text-white text-sm font-medium px-4 py-2 rounded-lg hover:bg-brand-600 disabled:opacity-50 transition-colors">
+          {saving ? 'Saving...' : 'Save'}
+        </button>
+        <button onClick={onCancel} className="text-sm font-medium text-gray-600 px-4 py-2 rounded-lg hover:bg-gray-100 transition-colors">Cancel</button>
+      </div>
+    </div>
+  );
+}
+
+function DiagnosisCard({ client, clientId, onRefresh }) {
+  const api = useApi();
+  const [adding, setAdding] = useState(false);
+  const [editingId, setEditingId] = useState(null);
+  const diagnoses = client.diagnoses || [];
+
+  const handleRemove = async (d) => {
+    if (!confirm(`Remove diagnosis ${d.icd10_code} — ${d.description}?`)) return;
+    await api.delete(`/clients/${clientId}/diagnosis/${d.id}`);
+    onRefresh();
+  };
+
+  return (
+    <div className="bg-white rounded-xl border border-gray-200 p-5">
+      <div className="flex items-center justify-between mb-3">
+        <h2 className="text-sm font-semibold text-gray-700">Diagnosis</h2>
+        {!adding && !editingId && (
+          <button onClick={() => setAdding(true)} className="text-xs text-brand-500 hover:underline">+ Add</button>
+        )}
+      </div>
+
+      {diagnoses.length === 0 && !adding && (
+        <p className="text-sm text-gray-400">No diagnosis on file.</p>
+      )}
+
+      {diagnoses.map(d => (
+        editingId === d.id ? (
+          <DiagnosisForm key={d.id} diag={d} clientId={clientId}
+            onSaved={() => { setEditingId(null); onRefresh(); }}
+            onCancel={() => setEditingId(null)} />
+        ) : (
+          <div key={d.id} className="text-sm py-2 border-b border-gray-50 last:border-0">
+            <div className="flex items-start justify-between">
+              <div>
+                <p className="font-medium">{d.icd10_code} — {d.description}</p>
+                <p className="text-gray-400 text-xs mt-0.5">{formatDate(d.diagnosed_at)}</p>
+                {d.notes && <p className="text-gray-500 text-xs mt-0.5">{d.notes}</p>}
+              </div>
+              <div className="flex gap-2 shrink-0 ml-2">
+                <button onClick={() => setEditingId(d.id)} className="text-xs text-brand-500 hover:underline">Edit</button>
+                <button onClick={() => handleRemove(d)} className="text-xs text-gray-400 hover:text-red-500 transition-colors">Remove</button>
+              </div>
+            </div>
+          </div>
+        )
+      ))}
+
+      {adding && (
+        <DiagnosisForm clientId={clientId}
+          onSaved={() => { setAdding(false); onRefresh(); }}
+          onCancel={() => setAdding(false)} />
+      )}
+    </div>
+  );
+}
+
 function InvoicesSidebar({ clientId, refresh, onSelect }) {
   const api = useApi();
   const [invoices, setInvoices] = useState([]);
@@ -816,6 +987,8 @@ export default function ClientProfile() {
               </div>
             )}
           </div>
+
+          <DiagnosisCard client={client} clientId={id} onRefresh={loadClient} />
 
           <div className="bg-white rounded-xl border border-gray-200 p-5">
             <h2 className="text-sm font-semibold text-gray-700 mb-3">Client billing</h2>
