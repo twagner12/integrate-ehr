@@ -1,5 +1,6 @@
 import { useState, useEffect, useRef } from 'react';
 import { useApi } from '../hooks/useApi.js';
+import { formatPhone, formatPhoneInput } from '../utils/phone.js';
 
 function Toggle({ label, checked, onChange }) {
   return (
@@ -73,7 +74,7 @@ function ContactCard({ contact, clientId, onRefresh, isOnlyBillingParty }) {
               )}
             </div>
             <p className="text-gray-400 text-xs">{contact.relationship}</p>
-            {contact.phone_primary && <p className="text-gray-600">{contact.phone_primary}</p>}
+            {contact.phone_primary && <p className="text-gray-600">{formatPhone(contact.phone_primary)}</p>}
             {contact.email && <p className="text-gray-600">{contact.email}</p>}
           </div>
           <div className="flex gap-2 text-xs">
@@ -103,13 +104,13 @@ function ContactCard({ contact, clientId, onRefresh, isOnlyBillingParty }) {
         </div>
         <div>
           <label className={labelClass}>Mobile phone</label>
-          <input type="tel" value={person.phone_primary}
-            onChange={e => setP('phone_primary', e.target.value)} className={inputClass} />
+          <input type="tel" value={formatPhoneInput(person.phone_primary)}
+            onChange={e => setP('phone_primary', formatPhoneInput(e.target.value))} className={inputClass} />
         </div>
         <div>
           <label className={labelClass}>Secondary phone</label>
-          <input type="tel" value={person.phone_secondary}
-            onChange={e => setP('phone_secondary', e.target.value)} className={inputClass} />
+          <input type="tel" value={formatPhoneInput(person.phone_secondary)}
+            onChange={e => setP('phone_secondary', formatPhoneInput(e.target.value))} className={inputClass} />
         </div>
         <div className="col-span-2">
           <label className={labelClass}>Email</label>
@@ -292,13 +293,13 @@ function AddContactForm({ clientId, onAdded, onCancel, existingContacts }) {
           </div>
           <div>
             <label className={labelClass}>Mobile phone</label>
-            <input type="tel" value={newPerson.phone_primary}
-              onChange={e => setNewPerson(f => ({ ...f, phone_primary: e.target.value }))} className={inputClass} />
+            <input type="tel" value={formatPhoneInput(newPerson.phone_primary)}
+              onChange={e => setNewPerson(f => ({ ...f, phone_primary: formatPhoneInput(e.target.value) }))} className={inputClass} />
           </div>
           <div>
             <label className={labelClass}>Secondary phone</label>
-            <input type="tel" value={newPerson.phone_secondary}
-              onChange={e => setNewPerson(f => ({ ...f, phone_secondary: e.target.value }))} className={inputClass} />
+            <input type="tel" value={formatPhoneInput(newPerson.phone_secondary)}
+              onChange={e => setNewPerson(f => ({ ...f, phone_secondary: formatPhoneInput(e.target.value) }))} className={inputClass} />
           </div>
           <div className="col-span-2">
             <label className={labelClass}>Email</label>

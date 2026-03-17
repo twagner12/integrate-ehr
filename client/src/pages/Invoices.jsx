@@ -1,6 +1,7 @@
 import { useState, useEffect, useCallback } from 'react';
 import { useParams, useNavigate } from 'react-router-dom';
 import { useApi } from '../hooks/useApi.js';
+import { formatPhone } from '../utils/phone.js';
 
 function fmt(amount) { return `$${parseFloat(amount || 0).toFixed(2)}`; }
 function toISO(d) { return d.toISOString().split('T')[0]; }
@@ -285,7 +286,7 @@ function InvoiceDetail({ invoiceId, onBack, onRefresh }) {
           <div>
             <p className="text-xs font-semibold text-gray-400 uppercase tracking-wide mb-1">Bill To</p>
             <p className="text-sm text-gray-900">{invoice.responsible_party_name || invoice.client_name}</p>
-            {invoice.responsible_party_phone && <p className="text-sm text-gray-500">{invoice.responsible_party_phone}</p>}
+            {invoice.responsible_party_phone && <p className="text-sm text-gray-500">{formatPhone(invoice.responsible_party_phone)}</p>}
             {invoice.responsible_party_email && <p className="text-sm text-gray-500">{invoice.responsible_party_email}</p>}
           </div>
           <div>
@@ -297,7 +298,7 @@ function InvoiceDetail({ invoiceId, onBack, onRefresh }) {
             <p className="text-sm text-gray-900">{invoice.clinician_name}</p>
             {invoice.tax_id && <p className="text-sm text-gray-500">Tax ID: {invoice.tax_id}</p>}
             {invoice.npi_number && <p className="text-sm text-gray-500">NPI: #{invoice.npi_number}</p>}
-            {invoice.clinician_phone && <p className="text-sm text-gray-500">{invoice.clinician_phone}</p>}
+            {invoice.clinician_phone && <p className="text-sm text-gray-500">{formatPhone(invoice.clinician_phone)}</p>}
           </div>
         </div>
 

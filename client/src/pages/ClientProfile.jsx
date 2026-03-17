@@ -1,7 +1,8 @@
 import { useState, useEffect, useRef, useCallback } from 'react';
 import { Link, useParams } from 'react-router-dom';
 import { useApi } from '../hooks/useApi.js';
-import NotesTab from '../components/NotesTab.jsx';
+import { useAuth } from '@clerk/react';
+import { formatPhone } from '../utils/phone.js';
 
 function formatDate(dateStr) {
   if (!dateStr) return '—';
@@ -486,7 +487,214 @@ function NewMenu({ onInvoice }) {
 }
 
 // ── Main ──────────────────────────────────────────────────────────────────────
-const TABS = ['Overview', 'Notes'];
+const SOAP_FIELDS = [
+  { key: 'subjective', label: 'S — Subjective' },
+  { key: 'objective', label: 'O — Objective' },
+  { key: 'assessment', label: 'A — Assessment' },
+  { key: 'note_plan', label: 'P — Plan' },
+];
+
+const sectionClass = "w-full border border-gray-200 rounded-lg px-3 py-2.5 text-sm focus:outline-none focus:ring-2 focus:ring-brand-400 resize-none min-h-[100px]";
+
+function NoteEditor({ note, clientId, onSaved, onCancel }) {
+  const api = useApi();
+  const [form, setForm] = useState({
+    subjective: note?.subjective || '',
+    objective: note?.objective || '',
+    assessment: note?.assessment || '',
+    plan: note?.note_plan || '',
+  });
+  const [saving, setSaving] = useState(false);
+  const [finalizing, setFinalizing] = useState(false);
+  const setF = (field, val) => setForm(f => ({ ...f, [field]: val }));
+
+  const handleSave = async () => {
+    setSaving(true);
+    try {
+      if (note?.note_id) {
+        await api.patch(`/notes/${note.note_id}`, form);
+      } else {
+        await api.post('/notes', { ...form, appointment_id: note.id, client_id: clientId });
+      }
+      onSaved();
+    } catch (err) { alert(err.message); }
+    finally { setSaving(false); }
+  };
+
+  const handleFinalize = async () => {
+    if (!confirm('Finalize this note? It will be locked for editing.')) return;
+    setFinalizing(true);
+    try {
+      if (!note?.note_id) {
+        const saved = await api.post('/notes', { ...form, appointment_id: note.id, client_id: clientId });
+        await api.post(`/notes/${saved.id}/finalize`);
+      } else {
+        await api.patch(`/notes/${note.note_id}`, form);
+        await api.post(`/notes/${note.note_id}/finalize`);
+      }
+      onSaved();
+    } catch (err) { alert(err.message); }
+    finally { setFinalizing(false); }
+  };
+
+  return (
+    <div className="mt-4 space-y-3">
+      {[
+        { key: 'subjective', label: 'S — Subjective' },
+        { key: 'objective', label: 'O — Objective' },
+        { key: 'assessment', label: 'A — Assessment' },
+        { key: 'plan', label: 'P — Plan' },
+      ].map(({ key, label }) => (
+        <div key={key}>
+          <label className="block text-xs font-semibold text-gray-500 uppercase tracking-wide mb-1">{label}</label>
+          <textarea value={form[key]} onChange={e => setF(key, e.target.value)}
+            className={sectionClass} placeholder={`Enter ${label.split('—')[1].trim().toLowerCase()}...`} />
+        </div>
+      ))}
+      <div className="flex items-center gap-2 pt-1">
+        <button onClick={handleFinalize} disabled={finalizing}
+          className="bg-brand-500 text-white text-sm font-medium px-4 py-2 rounded-lg hover:bg-brand-600 disabled:opacity-50 transition-colors">
+          {finalizing ? 'Finalizing...' : 'Finalize note'}
+        </button>
+        <button onClick={handleSave} disabled={saving}
+          className="border border-gray-300 text-sm font-medium text-gray-700 px-4 py-2 rounded-lg hover:bg-gray-50 disabled:opacity-50 transition-colors">
+          {saving ? 'Saving...' : 'Save draft'}
+        </button>
+        <button onClick={onCancel} className="text-sm text-gray-400 hover:text-gray-600 px-2 py-2">Cancel</button>
+      </div>
+    </div>
+  );
+}
+
+function TimelineEntry({ appt, clientId, isAdmin, onRefresh }) {
+  const api = useApi();
+  const [expanded, setExpanded] = useState(false);
+  const [editing, setEditing] = useState(false);
+  const [unlocking, setUnlocking] = useState(false);
+
+  const hasNote = !!appt.note_id;
+  const startDate = new Date(appt.starts_at);
+  const endDate = new Date(appt.ends_at);
+  const month = startDate.toLocaleDateString('en-US', { month: 'short' }).toUpperCase();
+  const day = startDate.getDate();
+  const timeRange = `${startDate.toLocaleTimeString('en-US', { hour: 'numeric', minute: '2-digit' })} – ${endDate.toLocaleTimeString('en-US', { hour: 'numeric', minute: '2-digit' })}`;
+
+  const handleUnlock = async () => {
+    if (!confirm('Unlock this note for editing?')) return;
+    setUnlocking(true);
+    try {
+      await api.post(`/notes/${appt.note_id}/unlock`);
+      onRefresh();
+    } catch (err) { alert(err.message); }
+    finally { setUnlocking(false); }
+  };
+
+  const notePreview = appt.subjective
+    ? (appt.subjective.length > 200 ? appt.subjective.slice(0, 200) + '...' : appt.subjective)
+    : null;
+
+  return (
+    <div className="flex gap-4">
+      {/* Date marker */}
+      <div className="w-12 shrink-0 text-center pt-1">
+        <p className="text-xs font-semibold text-gray-400">{month}</p>
+        <p className="text-lg font-bold text-gray-700 leading-tight">{day}</p>
+      </div>
+
+      {/* Card */}
+      <div className="flex-1 border border-gray-200 rounded-xl bg-white p-4 mb-1">
+        {/* Appointment header */}
+        <div className="flex items-start justify-between">
+          <div>
+            <p className="text-sm font-semibold text-gray-900">
+              APPOINTMENT
+              <span className="text-gray-400 font-normal ml-2">#{appt.id}</span>
+            </p>
+            <p className="text-xs text-gray-500 mt-0.5">
+              WITH: {appt.clinician_name.toUpperCase()}
+              <span className="ml-3">BILLING CODE: {appt.cpt_code}</span>
+            </p>
+          </div>
+          <div className="text-right shrink-0 ml-4">
+            <p className="text-sm text-gray-500">{timeRange}</p>
+            <div className="flex items-center gap-1.5 justify-end mt-1">
+              {statusBadge(appt.status)}
+              {billingBadge(appt.billing_status)}
+            </div>
+          </div>
+        </div>
+
+        {/* Note section */}
+        {hasNote && !editing ? (
+          <div className="mt-3 pt-3 border-t border-gray-100">
+            <div className="flex items-center gap-2 mb-1">
+              <p className="text-xs font-semibold text-gray-700">PROGRESS NOTE</p>
+              {appt.is_finalized ? (
+                <>
+                  <svg className="w-3 h-3 text-gray-400" fill="currentColor" viewBox="0 0 20 20">
+                    <path fillRule="evenodd" d="M5 9V7a5 5 0 0110 0v2a2 2 0 012 2v5a2 2 0 01-2 2H5a2 2 0 01-2-2v-5a2 2 0 012-2zm8-2v2H7V7a3 3 0 016 0z" clipRule="evenodd" />
+                  </svg>
+                  <span className="text-xs bg-green-50 text-green-700 font-medium px-1.5 py-0.5 rounded">Finalized</span>
+                  {isAdmin && (
+                    <button onClick={handleUnlock} disabled={unlocking}
+                      className="text-xs text-gray-400 hover:text-amber-600 disabled:opacity-50 ml-1">
+                      {unlocking ? 'Unlocking...' : 'Unlock'}
+                    </button>
+                  )}
+                </>
+              ) : (
+                <>
+                  <span className="text-xs bg-yellow-50 text-yellow-700 font-medium px-1.5 py-0.5 rounded">Draft</span>
+                  <button onClick={() => setEditing(true)} className="text-xs text-brand-500 hover:underline ml-1">Edit</button>
+                </>
+              )}
+            </div>
+            {!expanded && notePreview && (
+              <p className="text-sm text-gray-600 mt-1">{notePreview}</p>
+            )}
+            {expanded && (
+              <div className="mt-2 space-y-3">
+                {SOAP_FIELDS.map(({ key, label }) => (
+                  appt[key] ? (
+                    <div key={key}>
+                      <p className="text-xs font-semibold text-gray-400 uppercase tracking-wide mb-0.5">{label}</p>
+                      <p className="text-sm text-gray-700 whitespace-pre-wrap">{appt[key]}</p>
+                    </div>
+                  ) : null
+                ))}
+                <p className="text-xs text-gray-400 pt-1 border-t border-gray-100">
+                  Created {formatDateTime(appt.note_created_at)}
+                  {appt.finalized_at && ` · Finalized ${formatDateTime(appt.finalized_at)}`}
+                  {appt.unlocked_at && ` · Unlocked ${formatDateTime(appt.unlocked_at)}`}
+                </p>
+              </div>
+            )}
+            <button onClick={() => setExpanded(e => !e)}
+              className="text-sm text-brand-500 hover:underline mt-1.5 font-medium">
+              {expanded ? 'Collapse' : 'Read More'}
+            </button>
+          </div>
+        ) : editing ? (
+          <div className="mt-3 pt-3 border-t border-gray-100">
+            <NoteEditor
+              note={appt}
+              clientId={clientId}
+              onSaved={() => { setEditing(false); onRefresh(); }}
+              onCancel={() => setEditing(false)}
+            />
+          </div>
+        ) : appt.status !== 'Canceled' && appt.cpt_code && (
+          <div className="mt-3 pt-3 border-t border-gray-100">
+            <button onClick={() => setEditing(true)}
+              className="text-sm text-brand-500 hover:underline font-medium">
+              + Progress Note
+            </button>
+          </div>
+        )}
+      </div>
+    </div>
+  );
+}
 
 export default function ClientProfile() {
   const { id } = useParams();
@@ -494,7 +702,8 @@ export default function ClientProfile() {
   const [client, setClient] = useState(null);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState(null);
-  const [activeTab, setActiveTab] = useState('Overview');
+  const { sessionClaims } = useAuth();
+  const isAdmin = sessionClaims?.metadata?.role === 'admin';
   const [showInvoiceModal, setShowInvoiceModal] = useState(false);
   const [invoiceRefresh, setInvoiceRefresh] = useState(0);
   const [selectedInvoiceId, setSelectedInvoiceId] = useState(null);
@@ -513,15 +722,18 @@ export default function ClientProfile() {
   const uninvoicedAmount = uninvoicedAppts.reduce((sum, a) => sum + parseFloat(a.fee || 0), 0);
   const unpaidInvoiced   = client.appointments?.filter(a => a.billing_status === 'Invoiced') || [];
 
+  const nextAppt = client.appointments?.find(a => a.status !== 'Canceled' && new Date(a.starts_at) > new Date());
+  const dobDisplay = client.date_of_birth
+    ? new Date(client.date_of_birth).toLocaleDateString('en-US', { month: '2-digit', day: '2-digit', year: 'numeric', timeZone: 'UTC' })
+    : null;
+
   return (
     <div>
-      <div className="flex items-center justify-between mb-6">
+      {/* Header */}
+      <div className="flex items-center justify-between mb-1">
         <div className="flex items-center gap-3">
           <Link to="/clients" className="text-sm text-gray-400 hover:text-gray-600">← Clients</Link>
           <h1 className="text-2xl font-semibold text-gray-900">{client.full_name}</h1>
-          <span className={`text-xs font-medium px-2 py-0.5 rounded-full ${client.status === 'Active' ? 'bg-green-100 text-green-700' : 'bg-gray-100 text-gray-500'}`}>
-            {client.status}
-          </span>
         </div>
         <div className="flex items-center gap-2">
           <NewMenu onInvoice={() => setShowInvoiceModal(true)} />
@@ -532,82 +744,52 @@ export default function ClientProfile() {
         </div>
       </div>
 
+      {/* Info line under name */}
+      <div className="flex items-center gap-2 text-sm text-gray-500 mb-6 flex-wrap">
+        <span className={`text-xs font-medium px-2 py-0.5 rounded-full ${client.status === 'Active' ? 'bg-green-100 text-green-700' : 'bg-gray-100 text-gray-500'}`}>
+          {client.status}
+        </span>
+        {dobDisplay && (
+          <>
+            <span className="text-gray-300">|</span>
+            <span>DOB {dobDisplay} ({client.age} y/o)</span>
+          </>
+        )}
+        {nextAppt && (
+          <>
+            <span className="text-gray-300">|</span>
+            <span>Next Appt: <span className="font-medium text-gray-700">{fmtDate(nextAppt.starts_at)}</span></span>
+          </>
+        )}
+        <span className="text-gray-300">|</span>
+        <Link to={`/clients/${id}/edit`} className="text-brand-500 hover:underline">Edit</Link>
+      </div>
+
       <div className="grid grid-cols-3 gap-6">
         <div className="col-span-2 space-y-6">
-          <div className="flex gap-1 border-b border-gray-200">
-            {TABS.map(tab => (
-              <button key={tab} onClick={() => setActiveTab(tab)}
-                className={`px-4 py-2 text-sm font-medium transition-colors border-b-2 -mb-px ${activeTab === tab ? 'border-brand-500 text-brand-600' : 'border-transparent text-gray-500 hover:text-gray-700'}`}>
-                {tab}
-              </button>
-            ))}
-          </div>
 
-          {activeTab === 'Overview' && (
-            <div className="space-y-6">
-              <div className="bg-white rounded-xl border border-gray-200 p-5">
-                <h2 className="text-sm font-semibold text-gray-700 mb-3">Client info</h2>
-                <div className="grid grid-cols-2 gap-3 text-sm">
-                  <div><p className="text-gray-400">Date of birth</p><p className="font-medium">{formatDate(client.date_of_birth)}</p></div>
-                  <div><p className="text-gray-400">Age</p><p className="font-medium">{client.age ?? '—'}</p></div>
-                  <div><p className="text-gray-400">Primary clinician</p><p className="font-medium">{client.primary_clinician_name || '—'}</p></div>
-                  <div><p className="text-gray-400">Client since</p><p className="font-medium">{formatDate(client.created_at)}</p></div>
-                </div>
-                {client.admin_notes && (
-                  <div className="mt-3 pt-3 border-t border-gray-100">
-                    <p className="text-gray-400 text-xs mb-1">Admin notes</p>
-                    <p className="text-sm text-gray-700">{client.admin_notes}</p>
-                  </div>
-                )}
-              </div>
-
-              <div className="bg-white rounded-xl border border-gray-200 p-5">
-                <h2 className="text-sm font-semibold text-gray-700 mb-3">Diagnosis</h2>
-                {client.diagnosis ? (
-                  <div className="text-sm">
-                    <p className="font-medium">{client.diagnosis.icd10_code} — {client.diagnosis.description}</p>
-                    {client.diagnosis.notes && <p className="text-gray-500 mt-1">{client.diagnosis.notes}</p>}
-                    <p className="text-gray-400 text-xs mt-1">{formatDate(client.diagnosis.diagnosed_at)}</p>
-                  </div>
-                ) : <p className="text-sm text-gray-400">No diagnosis on file.</p>}
-              </div>
-
-              <div className="bg-white rounded-xl border border-gray-200 p-5">
-                <div className="flex items-center justify-between mb-3">
-                  <h2 className="text-sm font-semibold text-gray-700">Appointments</h2>
-                  <Link to={`/calendar?client=${id}`} className="text-xs text-brand-500 hover:underline">View calendar →</Link>
-                </div>
-                {!client.appointments?.length ? <p className="text-sm text-gray-400">No appointments yet.</p> : (
-                  <table className="w-full text-sm">
-                    <thead>
-                      <tr className="border-b border-gray-100">
-                        <th className="text-left py-2 text-gray-500 font-medium">Date</th>
-                        <th className="text-left py-2 text-gray-500 font-medium">Service</th>
-                        <th className="text-left py-2 text-gray-500 font-medium">Clinician</th>
-                        <th className="text-left py-2 text-gray-500 font-medium">Status</th>
-                        <th className="text-left py-2 text-gray-500 font-medium">Billing</th>
-                        <th className="text-right py-2 text-gray-500 font-medium">Fee</th>
-                      </tr>
-                    </thead>
-                    <tbody>
-                      {client.appointments.map(appt => (
-                        <tr key={appt.id} className="border-b border-gray-50">
-                          <td className="py-2 text-gray-600">{formatDateTime(appt.starts_at)}</td>
-                          <td className="py-2 text-gray-600">{appt.cpt_code}</td>
-                          <td className="py-2 text-gray-600">{appt.clinician_name}</td>
-                          <td className="py-2">{statusBadge(appt.status)}</td>
-                          <td className="py-2">{billingBadge(appt.billing_status)}</td>
-                          <td className="py-2 text-right text-gray-600">${parseFloat(appt.fee || 0).toFixed(2)}</td>
-                        </tr>
-                      ))}
-                    </tbody>
-                  </table>
-                )}
-              </div>
+          {/* Activity timeline */}
+          <div>
+            <div className="flex items-center justify-between mb-4">
+              <h2 className="text-sm font-semibold text-gray-700">Activity</h2>
+              <Link to={`/calendar?client=${id}`} className="text-xs text-brand-500 hover:underline">View calendar →</Link>
             </div>
-          )}
-
-          {activeTab === 'Notes' && <NotesTab clientId={id} />}
+            {!client.appointments?.length ? (
+              <p className="text-sm text-gray-400">No appointments yet.</p>
+            ) : (
+              <div className="space-y-3">
+                {client.appointments.map(appt => (
+                  <TimelineEntry
+                    key={appt.id}
+                    appt={appt}
+                    clientId={id}
+                    isAdmin={isAdmin}
+                    onRefresh={loadClient}
+                  />
+                ))}
+              </div>
+            )}
+          </div>
         </div>
 
         {/* Sidebar */}
@@ -627,7 +809,7 @@ export default function ClientProfile() {
                       )}
                     </div>
                     <p className="text-gray-400 text-xs">{contact.relationship}</p>
-                    {contact.phone_primary && <p className="text-gray-600">{contact.phone_primary}</p>}
+                    {contact.phone_primary && <p className="text-gray-600">{formatPhone(contact.phone_primary)}</p>}
                     {contact.email && <p className="text-gray-600">{contact.email}</p>}
                   </div>
                 ))}
@@ -888,7 +1070,7 @@ function InvoiceDetailModal({ invoiceId, onClose, onRefresh }) {
                 <div>
                   <p className="text-xs font-semibold text-gray-400 uppercase tracking-wide mb-1">Bill To</p>
                   <p className="text-gray-900">{invoice.responsible_party_name || invoice.client_name}</p>
-                  {invoice.responsible_party_phone && <p className="text-gray-500 text-xs">{invoice.responsible_party_phone}</p>}
+                  {invoice.responsible_party_phone && <p className="text-gray-500 text-xs">{formatPhone(invoice.responsible_party_phone)}</p>}
                   {invoice.responsible_party_email && <p className="text-gray-500 text-xs">{invoice.responsible_party_email}</p>}
                 </div>
                 <div>

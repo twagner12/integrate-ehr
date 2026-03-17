@@ -5,7 +5,6 @@ import Dashboard from './pages/Dashboard.jsx';
 import Clients from './pages/Clients.jsx';
 import Calendar from './pages/Calendar.jsx';
 import Invoices from './pages/Invoices.jsx';
-import Notes from './pages/Notes.jsx';
 import Settings from './pages/Settings.jsx';
 
 function ProtectedRoute({ children }) {
@@ -29,7 +28,6 @@ export default function App() {
                 <Route path="calendar" element={<Calendar />} />
                 <Route path="invoices" element={<Invoices />} />
                 <Route path="invoices/:id" element={<Invoices />} />
-                <Route path="notes" element={<Notes />} />
                 <Route path="settings" element={<Settings />} />
               </Routes>
             </Layout>

@@ -54,10 +54,14 @@ router.get('/:id', async (req, res, next) => {
       `, [id]),
       db.query(`SELECT * FROM diagnoses WHERE client_id = $1 ORDER BY created_at DESC LIMIT 1`, [id]),
       db.query(`
-        SELECT a.*, cl.full_name AS clinician_name, s.cpt_code, s.description AS service_description
+        SELECT a.*, cl.full_name AS clinician_name, s.cpt_code, s.description AS service_description,
+          n.id AS note_id, n.subjective, n.objective, n.assessment, n.plan AS note_plan,
+          n.is_finalized, n.finalized_at, n.unlocked_at,
+          n.created_at AS note_created_at, n.updated_at AS note_updated_at
         FROM appointments a
         JOIN clinicians cl ON cl.id = a.clinician_id
         JOIN services s ON s.id = a.service_id
+        LEFT JOIN notes n ON n.appointment_id = a.id
         WHERE a.client_id = $1
         ORDER BY a.starts_at DESC LIMIT 50
       `, [id]),

@@ -1,6 +1,7 @@
 import { useState, useEffect, useRef } from 'react';
 import { useUser, UserProfile } from '@clerk/react';
 import { useApi } from '../hooks/useApi.js';
+import { formatPhone, formatPhoneInput } from '../utils/phone.js';
 
 const inputClass = "w-full border border-gray-300 rounded-lg px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-brand-400";
 const labelClass = "block text-sm font-medium text-gray-700 mb-1";
@@ -131,9 +132,9 @@ function PracticeDetailsSection() {
           </div>
           <div>
             <label className={labelClass}>Phone</label>
-            <input type="tel" value={form.phone}
-              onChange={e => setF('phone', e.target.value)}
-              className={inputClass} placeholder="(847) 555-0000" />
+            <input type="tel" value={formatPhoneInput(form.phone)}
+              onChange={e => setF('phone', formatPhoneInput(e.target.value))}
+              className={inputClass} placeholder="847-555-0000" />
           </div>
         </div>
 
@@ -226,9 +227,9 @@ function CliniciansForm({ form, setF }) {
       </div>
       <div>
         <label className={labelClass}>Phone</label>
-        <input type="tel" value={form.phone}
-          onChange={e => setF('phone', e.target.value)}
-          className={inputClass} placeholder="(847) 555-0000" />
+        <input type="tel" value={formatPhoneInput(form.phone)}
+          onChange={e => setF('phone', formatPhoneInput(e.target.value))}
+          className={inputClass} placeholder="847-555-0000" />
       </div>
     </div>
   );
@@ -342,7 +343,7 @@ function CliniciansSection() {
                     <div className="mt-1 flex flex-wrap gap-x-4 gap-y-0.5 text-xs text-gray-500">
                       {c.npi_number     && <span>NPI: {c.npi_number}</span>}
                       {c.license_number && <span>License: {c.license_number}</span>}
-                      {c.phone          && <span>{c.phone}</span>}
+                      {c.phone          && <span>{formatPhone(c.phone)}</span>}
                     </div>
                   </div>
                   <div className="flex gap-3 text-xs ml-4">
@@ -680,8 +681,8 @@ function ProfileSection() {
             {loading ? (
               <div className="h-9 bg-gray-100 rounded-lg animate-pulse" />
             ) : (
-              <input type="tel" value={phone} onChange={e => setPhone(e.target.value)}
-                className={inputClass} placeholder="(847) 555-0000" />
+              <input type="tel" value={formatPhoneInput(phone)} onChange={e => setPhone(formatPhoneInput(e.target.value))}
+                className={inputClass} placeholder="847-555-0000" />
             )}
           </div>
         </div>
