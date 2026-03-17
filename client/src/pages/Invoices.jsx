@@ -169,6 +169,17 @@ function InvoiceDetail({ invoiceId, onBack, onRefresh }) {
     finally { setCreatingPayLink(false); }
   };
 
+  const handleChargeCard = async () => {
+    if (!confirm('Charge the card on file for this invoice?')) return;
+    setSaving(true);
+    try {
+      await api.post(`/payments/charge/${invoiceId}`);
+      await load();
+      onRefresh();
+    } catch (err) { alert(err.message); }
+    finally { setSaving(false); }
+  };
+
   const handleDownloadPdf = async () => {
     const blob = await pdf(<InvoicePdf invoice={invoice} />).toBlob();
     const url = URL.createObjectURL(blob);
@@ -283,8 +294,12 @@ function InvoiceDetail({ invoiceId, onBack, onRefresh }) {
           <StatusBadge status={invoice.status} />
           {!isPaid && (
             <>
-              <button onClick={handlePaymentLink} disabled={creatingPayLink}
+              <button onClick={handleChargeCard} disabled={saving}
                 className="bg-brand-500 text-white text-sm font-medium px-4 py-2 rounded-lg hover:bg-brand-600 disabled:opacity-50 transition-colors">
+                {saving ? 'Charging...' : 'Charge card'}
+              </button>
+              <button onClick={handlePaymentLink} disabled={creatingPayLink}
+                className="border border-brand-300 text-brand-600 text-sm font-medium px-4 py-2 rounded-lg hover:bg-brand-50 disabled:opacity-50 transition-colors">
                 {creatingPayLink ? 'Creating...' : 'Payment link'}
               </button>
               <button onClick={handleMarkPaid} disabled={saving}

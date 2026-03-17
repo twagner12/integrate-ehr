@@ -598,6 +598,64 @@ function DiagnosisCard({ client, clientId, onRefresh }) {
   );
 }
 
+function BillingCard({ clientId, uninvoicedAppts, uninvoicedAmount, unpaidInvoiced, onNewInvoice }) {
+  const api = useApi();
+  const [card, setCard] = useState(null);
+  const [loadingCard, setLoadingCard] = useState(true);
+
+  useEffect(() => {
+    api.get(`/payments/card/${clientId}`)
+      .then(setCard)
+      .catch(() => setCard({ has_card: false }))
+      .finally(() => setLoadingCard(false));
+  }, [clientId]);
+
+  const handleSetupCard = async () => {
+    try {
+      const { url } = await api.post(`/payments/setup/${clientId}`);
+      await navigator.clipboard.writeText(url);
+      alert('Card setup link copied to clipboard. Send it to the parent to save their card.');
+    } catch (err) { alert(err.message); }
+  };
+
+  return (
+    <div className="bg-white rounded-xl border border-gray-200 p-5">
+      <h2 className="text-sm font-semibold text-gray-700 mb-3">Client billing</h2>
+      <div className="space-y-2 text-sm mb-4">
+        <div className="flex justify-between">
+          <span className="text-gray-500">Uninvoiced ({uninvoicedAppts.length})</span>
+          <span className="font-medium">${uninvoicedAmount.toFixed(2)}</span>
+        </div>
+        <div className="flex justify-between">
+          <span className="text-gray-500">Unpaid invoices ({unpaidInvoiced.length})</span>
+          <span className="font-medium text-orange-600">
+            ${unpaidInvoiced.reduce((s, a) => s + parseFloat(a.fee || 0), 0).toFixed(2)}
+          </span>
+        </div>
+        <div className="flex justify-between items-center pt-2 border-t border-gray-100">
+          <span className="text-gray-500">Card on file</span>
+          {loadingCard ? (
+            <span className="text-gray-400 text-xs">Loading...</span>
+          ) : card?.has_card ? (
+            <span className="text-xs font-medium text-gray-700">
+              {card.brand?.toUpperCase()} •••• {card.last4}
+              <span className="text-gray-400 ml-1">{card.exp_month}/{card.exp_year}</span>
+            </span>
+          ) : (
+            <button onClick={handleSetupCard} className="text-xs text-brand-500 hover:underline">
+              + Setup card
+            </button>
+          )}
+        </div>
+      </div>
+      <button onClick={onNewInvoice}
+        className="w-full bg-brand-500 text-white text-sm font-medium py-2 rounded-lg hover:bg-brand-600 transition-colors">
+        + New Invoice
+      </button>
+    </div>
+  );
+}
+
 function InvoicesSidebar({ clientId, refresh, onSelect }) {
   const api = useApi();
   const [invoices, setInvoices] = useState([]);
@@ -993,25 +1051,13 @@ export default function ClientProfile() {
 
           <DiagnosisCard client={client} clientId={id} onRefresh={loadClient} />
 
-          <div className="bg-white rounded-xl border border-gray-200 p-5">
-            <h2 className="text-sm font-semibold text-gray-700 mb-3">Client billing</h2>
-            <div className="space-y-2 text-sm mb-4">
-              <div className="flex justify-between">
-                <span className="text-gray-500">Uninvoiced ({uninvoicedAppts.length})</span>
-                <span className="font-medium">${uninvoicedAmount.toFixed(2)}</span>
-              </div>
-              <div className="flex justify-between">
-                <span className="text-gray-500">Unpaid invoices ({unpaidInvoiced.length})</span>
-                <span className="font-medium text-orange-600">
-                  ${unpaidInvoiced.reduce((s, a) => s + parseFloat(a.fee || 0), 0).toFixed(2)}
-                </span>
-              </div>
-            </div>
-            <button onClick={() => setShowInvoiceModal(true)}
-              className="w-full bg-brand-500 text-white text-sm font-medium py-2 rounded-lg hover:bg-brand-600 transition-colors">
-              + New Invoice
-            </button>
-          </div>
+          <BillingCard
+            clientId={id}
+            uninvoicedAppts={uninvoicedAppts}
+            uninvoicedAmount={uninvoicedAmount}
+            unpaidInvoiced={unpaidInvoiced}
+            onNewInvoice={() => setShowInvoiceModal(true)}
+          />
 
           <div className="bg-white rounded-xl border border-gray-200 p-5">
             <div className="flex items-center justify-between mb-3">
@@ -1145,6 +1191,17 @@ function InvoiceDetailModal({ invoiceId, onClose, onRefresh }) {
     catch (err) { alert(err.message); setDeleting(false); }
   };
 
+  const handleChargeCard = async () => {
+    if (!confirm('Charge the card on file for this invoice?')) return;
+    setSaving(true);
+    try {
+      await api.post(`/payments/charge/${invoiceId}`);
+      await load();
+      onRefresh();
+    } catch (err) { alert(err.message); }
+    finally { setSaving(false); }
+  };
+
   const addLine = () => setLineItems(p => [...p, { id: null, service_date: new Date().toISOString().split('T')[0], description: '', amount: '0', appointment_id: null }]);
   const removeLine = idx => setLineItems(p => p.filter((_, i) => i !== idx));
   const updateLine = (idx, f, v) => setLineItems(p => p.map((item, i) => i === idx ? { ...item, [f]: v } : item));
@@ -1162,8 +1219,12 @@ function InvoiceDetailModal({ invoiceId, onClose, onRefresh }) {
               <>
                 {invoice?.status !== 'Paid' && (
                   <>
+                    <button onClick={handleChargeCard} disabled={saving}
+                      className="bg-brand-500 text-white text-sm font-medium px-3 py-1.5 rounded-lg hover:bg-brand-600 disabled:opacity-50">
+                      {saving ? 'Charging...' : 'Charge card'}
+                    </button>
                     <button onClick={handlePaymentLink}
-                      className="bg-brand-500 text-white text-sm font-medium px-3 py-1.5 rounded-lg hover:bg-brand-600">
+                      className="border border-brand-300 text-brand-600 text-sm font-medium px-3 py-1.5 rounded-lg hover:bg-brand-50">
                       Payment link
                     </button>
                     <button onClick={handleMarkPaid} disabled={saving}
