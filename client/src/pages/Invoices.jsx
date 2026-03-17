@@ -92,6 +92,7 @@ function InvoiceDetail({ invoiceId, onBack, onRefresh }) {
   const [editing, setEditing] = useState(false);
   const [saving, setSaving] = useState(false);
   const [deleting, setDeleting] = useState(false);
+  const [creatingPayLink, setCreatingPayLink] = useState(false);
   const [issuedDate, setIssuedDate] = useState('');
   const [dueDate, setDueDate] = useState('');
   const [lineItems, setLineItems] = useState([]);
@@ -153,6 +154,16 @@ function InvoiceDetail({ invoiceId, onBack, onRefresh }) {
       await api.delete(`/invoices/${invoiceId}`);
       onRefresh(); onBack();
     } catch (err) { alert(err.message); setDeleting(false); }
+  };
+
+  const handlePaymentLink = async () => {
+    setCreatingPayLink(true);
+    try {
+      const { url } = await api.post(`/payments/checkout/${invoiceId}`);
+      await navigator.clipboard.writeText(url);
+      alert('Payment link copied to clipboard.');
+    } catch (err) { alert(err.message); }
+    finally { setCreatingPayLink(false); }
   };
 
   if (loading) return <div className="text-sm text-gray-400 p-6">Loading...</div>;
@@ -247,10 +258,16 @@ function InvoiceDetail({ invoiceId, onBack, onRefresh }) {
         <div className="flex items-center gap-3">
           <StatusBadge status={invoice.status} />
           {!isPaid && (
-            <button onClick={handleMarkPaid} disabled={saving}
-              className="bg-green-500 text-white text-sm font-medium px-4 py-2 rounded-lg hover:bg-green-600 disabled:opacity-50 transition-colors">
-              {saving ? 'Saving...' : 'Mark as paid'}
-            </button>
+            <>
+              <button onClick={handlePaymentLink} disabled={creatingPayLink}
+                className="bg-brand-500 text-white text-sm font-medium px-4 py-2 rounded-lg hover:bg-brand-600 disabled:opacity-50 transition-colors">
+                {creatingPayLink ? 'Creating...' : 'Payment link'}
+              </button>
+              <button onClick={handleMarkPaid} disabled={saving}
+                className="bg-green-500 text-white text-sm font-medium px-4 py-2 rounded-lg hover:bg-green-600 disabled:opacity-50 transition-colors">
+                {saving ? 'Saving...' : 'Mark as paid'}
+              </button>
+            </>
           )}
           <button onClick={() => setEditing(true)}
             className="border border-gray-300 text-gray-700 text-sm font-medium px-4 py-2 rounded-lg hover:bg-gray-50 transition-colors">

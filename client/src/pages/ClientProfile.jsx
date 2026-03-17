@@ -1106,6 +1106,14 @@ function InvoiceDetailModal({ invoiceId, onClose, onRefresh }) {
     finally { setSaving(false); }
   };
 
+  const handlePaymentLink = async () => {
+    try {
+      const { url } = await api.post(`/payments/checkout/${invoiceId}`);
+      await navigator.clipboard.writeText(url);
+      alert('Payment link copied to clipboard.');
+    } catch (err) { alert(err.message); }
+  };
+
   const handleDelete = async () => {
     if (!confirm(`Delete invoice #${invoice.invoice_number}? Sessions will be marked uninvoiced.`)) return;
     setDeleting(true);
@@ -1129,10 +1137,16 @@ function InvoiceDetailModal({ invoiceId, onClose, onRefresh }) {
             {!loading && !editing && (
               <>
                 {invoice?.status !== 'Paid' && (
-                  <button onClick={handleMarkPaid} disabled={saving}
-                    className="bg-green-500 text-white text-sm font-medium px-3 py-1.5 rounded-lg hover:bg-green-600 disabled:opacity-50">
-                    {saving ? 'Saving...' : 'Mark paid'}
-                  </button>
+                  <>
+                    <button onClick={handlePaymentLink}
+                      className="bg-brand-500 text-white text-sm font-medium px-3 py-1.5 rounded-lg hover:bg-brand-600">
+                      Payment link
+                    </button>
+                    <button onClick={handleMarkPaid} disabled={saving}
+                      className="bg-green-500 text-white text-sm font-medium px-3 py-1.5 rounded-lg hover:bg-green-600 disabled:opacity-50">
+                      {saving ? 'Saving...' : 'Mark paid'}
+                    </button>
+                  </>
                 )}
                 <button onClick={() => setEditing(true)}
                   className="border border-gray-300 text-gray-700 text-sm font-medium px-3 py-1.5 rounded-lg hover:bg-gray-50">
