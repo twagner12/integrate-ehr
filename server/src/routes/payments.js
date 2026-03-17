@@ -39,7 +39,8 @@ router.post('/checkout/:invoiceId', async (req, res, next) => {
       return res.status(400).json({ error: 'Invoice is already paid' });
     }
 
-    const balanceCents = Math.round(parseFloat(invoice.balance) * 100);
+    const balance = parseFloat(invoice.total || 0) - parseFloat(invoice.amount_paid || 0);
+    const balanceCents = Math.round(balance * 100);
 
     const session = await stripe.checkout.sessions.create({
       mode: 'payment',
