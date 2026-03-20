@@ -10,6 +10,7 @@ import settingsRouter     from './settings.js';
 import profileRouter from './profile.js';
 import invoicesRouter  from './invoices.js';
 import paymentsRouter from './payments.js';
+import reportsRouter from './reports.js';
 import portalRouter from './portal.js';
 import filesRouter from './files.js';
 
@@ -27,6 +28,7 @@ router.use('/settings',     requireStaff, settingsRouter);
 router.use('/profile',                    profileRouter);
 router.use('/invoices',    requireStaff, invoicesRouter);
 router.use('/payments',   requireStaff, paymentsRouter);
+router.use('/reports',   requireStaff, reportsRouter);
 router.use('/portal',                 portalRouter);
 router.use('/files',      requireStaff, filesRouter);
 

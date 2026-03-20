@@ -7,6 +7,7 @@ import Clients from './pages/Clients.jsx';
 import Calendar from './pages/Calendar.jsx';
 import Invoices from './pages/Invoices.jsx';
 import Settings from './pages/Settings.jsx';
+import Reports from './pages/Reports.jsx';
 import PortalHome from './pages/portal/PortalHome.jsx';
 import PortalChild from './pages/portal/PortalChild.jsx';
 import PortalAppointments from './pages/portal/PortalAppointments.jsx';
@@ -49,6 +50,7 @@ export default function App() {
                 <Route path="calendar" element={<Calendar />} />
                 <Route path="invoices" element={<Invoices />} />
                 <Route path="invoices/:id" element={<Invoices />} />
+                <Route path="reports" element={<Reports />} />
                 <Route path="settings" element={<Settings />} />
               </Routes>
             </Layout>
