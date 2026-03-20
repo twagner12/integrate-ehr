@@ -5,6 +5,7 @@ import { clerkMiddleware } from '@clerk/express';
 import { errorHandler } from './middleware/errorHandler.js';
 import router from './routes/index.js';
 import { handleStripeWebhook } from './routes/payments.js';
+import { startScheduler } from './services/scheduler.js';
 
 const app = express();
 const PORT = process.env.PORT || 3001;
@@ -28,4 +29,5 @@ app.use(errorHandler);
 
 app.listen(PORT, () => {
   console.log(`Integrate API running on port ${PORT}`);
+  startScheduler();
 });

@@ -473,7 +473,7 @@ function GenerateFlow({ onClose, onDone }) {
     const ids = Array.from(selected);
     if (!ids.length) { alert('No sessions selected.'); return; }
     setGenerating(true);
-    try { await api.post('/invoices/generate', { appointment_ids: ids }); onDone(); }
+    try { await api.post('/invoices/generate-batch', { appointment_ids: ids }); onDone(); }
     catch (err) { alert(err.message); }
     finally { setGenerating(false); }
   };

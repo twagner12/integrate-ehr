@@ -190,6 +190,110 @@ router.post('/generate', async (req, res, next) => {
   }
 });
 
+// ── POST /api/invoices/generate-batch ────────────────────────────────────────
+// Accepts selected appointment IDs, groups by client, creates one invoice per client
+router.post('/generate-batch', async (req, res, next) => {
+  const pgClient = await pool.connect();
+  try {
+    await pgClient.query('BEGIN');
+
+    const { appointment_ids } = req.body;
+    if (!appointment_ids?.length) {
+      return res.status(400).json({ error: 'appointment_ids is required' });
+    }
+
+    // Fetch all selected appointments with service + clinician info
+    const { rows: appointments } = await pgClient.query(`
+      SELECT
+        a.id, a.client_id, a.clinician_id, a.starts_at, a.fee, a.status,
+        s.cpt_code, s.description AS service_description,
+        cl.full_name AS clinician_name
+      FROM appointments a
+      JOIN services s ON s.id = a.service_id
+      JOIN clinicians cl ON cl.id = a.clinician_id
+      WHERE a.id = ANY($1)
+        AND a.billing_status = 'Uninvoiced'
+        AND a.status IN ('Show', 'No Show', 'Late Cancel')
+      ORDER BY a.starts_at ASC
+    `, [appointment_ids]);
+
+    if (!appointments.length) {
+      await pgClient.query('ROLLBACK');
+      return res.status(400).json({ error: 'No eligible uninvoiced appointments found' });
+    }
+
+    // Group by client
+    const byClient = {};
+    for (const a of appointments) {
+      if (!byClient[a.client_id]) byClient[a.client_id] = [];
+      byClient[a.client_id].push(a);
+    }
+
+    const { rows: csRows } = await pgClient.query('SELECT * FROM clinic_settings LIMIT 1');
+    const cs = csRows[0] || {};
+    const footer = cs.invoice_footer || 'Make Payments to: Anna Wagner Inc.';
+    const dueDays = cs.invoice_due_days || 15;
+    const issuedDate = new Date().toISOString().split('T')[0];
+    const dueD = new Date();
+    dueD.setDate(dueD.getDate() + dueDays);
+    const dueDate = dueD.toISOString().split('T')[0];
+
+    const created = [];
+
+    for (const [clientId, appts] of Object.entries(byClient)) {
+      // Use the most common clinician for this batch as the invoice provider
+      const clinicianCounts = {};
+      for (const a of appts) {
+        clinicianCounts[a.clinician_id] = (clinicianCounts[a.clinician_id] || 0) + 1;
+      }
+      const clinicianId = Object.entries(clinicianCounts).sort((a, b) => b[1] - a[1])[0][0];
+
+      const subtotal = appts.reduce((sum, a) => sum + parseFloat(a.fee || 0), 0);
+
+      const { rows: seqRows } = await pgClient.query(`SELECT nextval('invoice_number_seq') AS num`);
+      const invoiceNumber = parseInt(seqRows[0].num);
+
+      const { rows: invRows } = await pgClient.query(`
+        INSERT INTO invoices
+          (invoice_number, client_id, clinician_id, issued_date, due_date,
+           status, subtotal, total, footer_text)
+        VALUES ($1,$2,$3,$4,$5,'Sent',$6,$7,$8)
+        RETURNING *
+      `, [invoiceNumber, clientId, clinicianId, issuedDate, dueDate,
+          subtotal, subtotal, footer]);
+
+      const invoice = invRows[0];
+      const apptIds = [];
+
+      for (const a of appts) {
+        const desc = `${a.service_description} (${a.cpt_code}) with ${a.clinician_name}${a.status === 'No Show' ? ' — No Show' : ''}`;
+        await pgClient.query(`
+          INSERT INTO invoice_items
+            (invoice_id, appointment_id, service_date, description, amount, is_no_show, cpt_code)
+          VALUES ($1,$2,$3,$4,$5,$6,$7)
+        `, [invoice.id, a.id, a.starts_at.toISOString().split('T')[0],
+            desc, a.fee, a.status === 'No Show', a.cpt_code || null]);
+        apptIds.push(a.id);
+      }
+
+      await pgClient.query(`
+        UPDATE appointments SET billing_status = 'Invoiced', updated_at = now()
+        WHERE id = ANY($1)
+      `, [apptIds]);
+
+      created.push(invoice);
+    }
+
+    await pgClient.query('COMMIT');
+    res.status(201).json({ invoices: created, count: created.length });
+  } catch (err) {
+    await pgClient.query('ROLLBACK');
+    next(err);
+  } finally {
+    pgClient.release();
+  }
+});
+
 // ── PATCH /api/invoices/:id ───────────────────────────────────────────────────
 router.patch('/:id', async (req, res, next) => {
   const pgClient = await pool.connect();

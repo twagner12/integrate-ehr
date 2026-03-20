@@ -6,6 +6,7 @@ import { formatPhone } from '../utils/phone.js';
 import { pdf } from '@react-pdf/renderer';
 import InvoicePdf from '../components/pdf/InvoicePdf.jsx';
 import SuperbillPdf from '../components/pdf/SuperbillPdf.jsx';
+import FilesPanel from '../components/FilesPanel.jsx';
 
 function formatDate(dateStr) {
   if (!dateStr) return '—';
@@ -92,6 +93,7 @@ function CreateInvoiceModal({ client, onClose, onCreated }) {
           description:    `${r.service_description} (${r.cpt_code}) with ${r.clinician_name}${r.status === 'No Show' ? ' — No Show' : ''}`,
           amount:         parseFloat(r.fee || 0),
           is_no_show:     r.status === 'No Show',
+          cpt_code:       r.cpt_code,
           _key:           r.id,
         })));
       }
@@ -118,6 +120,7 @@ function CreateInvoiceModal({ client, onClose, onCreated }) {
             description:    `${s.service_description} (${s.cpt_code}) with ${s.clinician_name}${s.status === 'No Show' ? ' — No Show' : ''}`,
             amount:         parseFloat(s.fee || 0),
             is_no_show:     s.status === 'No Show',
+            cpt_code:       s.cpt_code,
             _key:           s.id,
           }].sort((a, b) => a.service_date.localeCompare(b.service_date)));
         }
@@ -138,6 +141,7 @@ function CreateInvoiceModal({ client, onClose, onCreated }) {
         description:    `${r.service_description} (${r.cpt_code}) with ${r.clinician_name}${r.status === 'No Show' ? ' — No Show' : ''}`,
         amount:         parseFloat(r.fee || 0),
         is_no_show:     r.status === 'No Show',
+        cpt_code:       r.cpt_code,
         _key:           r.id,
       })).sort((a, b) => a.service_date.localeCompare(b.service_date)));
     }
@@ -182,6 +186,7 @@ function CreateInvoiceModal({ client, onClose, onCreated }) {
           description:    i.description,
           amount:         parseFloat(i.amount || 0),
           is_no_show:     i.is_no_show || false,
+          cpt_code:       i.cpt_code || null,
         })),
       });
       onCreated();
@@ -1064,6 +1069,13 @@ export default function ClientProfile() {
               <h2 className="text-sm font-semibold text-gray-700">Invoices</h2>
             </div>
             <InvoicesSidebar clientId={id} refresh={invoiceRefresh} onSelect={setSelectedInvoiceId} />
+          </div>
+
+          <div className="bg-white rounded-xl border border-gray-200 p-5">
+            <div className="flex items-center justify-between mb-3">
+              <h2 className="text-sm font-semibold text-gray-700">Files</h2>
+            </div>
+            <FilesPanel clientId={id} />
           </div>
         </div>
       </div>

@@ -11,6 +11,7 @@ import profileRouter from './profile.js';
 import invoicesRouter  from './invoices.js';
 import paymentsRouter from './payments.js';
 import portalRouter from './portal.js';
+import filesRouter from './files.js';
 
 const router = Router();
 
@@ -27,6 +28,7 @@ router.use('/profile',                    profileRouter);
 router.use('/invoices',    requireStaff, invoicesRouter);
 router.use('/payments',   requireStaff, paymentsRouter);
 router.use('/portal',                 portalRouter);
+router.use('/files',      requireStaff, filesRouter);
 
 router.get('/ping', (req, res) => res.json({ message: 'API ready' }));
 
