@@ -24,11 +24,25 @@ function downloadCsv(filename, headers, rows) {
   URL.revokeObjectURL(url);
 }
 
-function monthRange() {
+function datePresets() {
   const now = new Date();
-  const start = new Date(now.getFullYear(), now.getMonth(), 1);
-  const end = new Date(now.getFullYear(), now.getMonth() + 1, 0);
-  return { start: toISO(start), end: toISO(end) };
+  const y = now.getFullYear();
+  const m = now.getMonth();
+  return [
+    { label: 'This month',    start: toISO(new Date(y, m, 1)),     end: toISO(new Date(y, m + 1, 0)) },
+    { label: 'Last month',    start: toISO(new Date(y, m - 1, 1)), end: toISO(new Date(y, m, 0)) },
+    { label: 'This quarter',  start: toISO(new Date(y, Math.floor(m / 3) * 3, 1)), end: toISO(new Date(y, Math.floor(m / 3) * 3 + 3, 0)) },
+    { label: 'Last quarter',  start: toISO(new Date(y, Math.floor(m / 3) * 3 - 3, 1)), end: toISO(new Date(y, Math.floor(m / 3) * 3, 0)) },
+    { label: 'This year',     start: toISO(new Date(y, 0, 1)),     end: toISO(new Date(y, 11, 31)) },
+    { label: 'Last year',     start: toISO(new Date(y - 1, 0, 1)), end: toISO(new Date(y - 1, 11, 31)) },
+    { label: 'Last 30 days',  start: toISO(new Date(now.getTime() - 30 * 86400000)), end: toISO(now) },
+    { label: 'Last 90 days',  start: toISO(new Date(now.getTime() - 90 * 86400000)), end: toISO(now) },
+  ];
+}
+
+function monthRange() {
+  const p = datePresets()[0];
+  return { start: p.start, end: p.end };
 }
 
 // ── Shared UI ────────────────────────────────────────────────────────────────
@@ -59,6 +73,31 @@ function DateInput({ label, value, onChange }) {
       {label}
       <input type="date" value={value} onChange={e => onChange(e.target.value)} className="border border-gray-300 rounded-lg px-2.5 py-1.5 text-sm bg-white focus:outline-none focus:ring-2 focus:ring-brand-500 focus:border-brand-500" />
     </label>
+  );
+}
+
+function DateRangeFilter({ start, end, onStartChange, onEndChange }) {
+  const presets = datePresets();
+  const handlePreset = (e) => {
+    const preset = presets.find(p => p.label === e.target.value);
+    if (preset) { onStartChange(preset.start); onEndChange(preset.end); }
+  };
+  // Determine if current range matches a preset
+  const activePreset = presets.find(p => p.start === start && p.end === end)?.label || '';
+
+  return (
+    <div className="flex items-center gap-3 flex-wrap">
+      <select
+        value={activePreset}
+        onChange={handlePreset}
+        className="border border-gray-300 rounded-lg px-2.5 py-1.5 text-sm bg-white focus:outline-none focus:ring-2 focus:ring-brand-500 focus:border-brand-500"
+      >
+        <option value="" disabled>Quick range...</option>
+        {presets.map(p => <option key={p.label} value={p.label}>{p.label}</option>)}
+      </select>
+      <DateInput label="From" value={start} onChange={onStartChange} />
+      <DateInput label="To" value={end} onChange={onEndChange} />
+    </div>
   );
 }
 
@@ -199,8 +238,7 @@ function ClinicianReport() {
     <div>
       <div className="flex items-center justify-between mb-4 flex-wrap gap-3">
         <div className="flex items-center gap-4 flex-wrap">
-          <DateInput label="From" value={start} onChange={setStart} />
-          <DateInput label="To" value={end} onChange={setEnd} />
+          <DateRangeFilter start={start} end={end} onStartChange={setStart} onEndChange={setEnd} />
           <FilterSelect label="Clinician" value={clinicianId} onChange={setClinicianId} options={clinicians.map(c => ({ value: c.id, label: c.full_name }))} />
         </div>
         <ExportButton onClick={handleExport} />
@@ -315,8 +353,7 @@ function AttendanceReport() {
     <div>
       <div className="flex items-center justify-between mb-4 flex-wrap gap-3">
         <div className="flex items-center gap-4 flex-wrap">
-          <DateInput label="From" value={start} onChange={setStart} />
-          <DateInput label="To" value={end} onChange={setEnd} />
+          <DateRangeFilter start={start} end={end} onStartChange={setStart} onEndChange={setEnd} />
           <FilterSelect label="Client" value={clientId} onChange={setClientId} options={clients.map(c => ({ value: c.id, label: c.full_name }))} />
           <FilterSelect label="Clinician" value={clinicianId} onChange={setClinicianId} options={clinicians.map(c => ({ value: c.id, label: c.full_name }))} />
           <FilterSelect label="Status" value={status} onChange={setStatus} options={STATUS_OPTIONS} />
