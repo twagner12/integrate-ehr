@@ -1,6 +1,17 @@
 import { Router } from 'express';
+import multer from 'multer';
+import { randomUUID } from 'crypto';
+import path from 'path';
 import { getRole } from '../middleware/auth.js';
 import { db } from '../db/index.js';
+import { transcribeAudio, generateSOAPNote } from '../services/ai.js';
+
+const uploadDir = path.resolve(import.meta.dirname, '../../uploads');
+const storage = multer.diskStorage({
+  destination: (_req, _file, cb) => cb(null, uploadDir),
+  filename: (_req, file, cb) => cb(null, `${randomUUID()}-${file.originalname}`),
+});
+const audioUpload = multer({ storage });
 
 const router = Router();
 
@@ -142,6 +153,68 @@ router.post('/:id/unlock', async (req, res, next) => {
         updated_at = now()
       WHERE id = $1 RETURNING *
     `, [req.params.id]);
+    res.json(rows[0]);
+  } catch (err) { next(err); }
+});
+
+// POST /api/notes/transcribe
+router.post('/transcribe', audioUpload.single('audio'), async (req, res, next) => {
+  try {
+    if (!req.file) return res.status(400).json({ error: 'No audio file uploaded' });
+    const transcript = await transcribeAudio(req.file.path);
+    res.json({ transcript, audio_filename: req.file.filename });
+  } catch (err) { next(err); }
+});
+
+// POST /api/notes/generate-soap
+router.post('/generate-soap', async (req, res, next) => {
+  try {
+    const { transcript, appointment_id } = req.body;
+    if (!transcript) return res.status(400).json({ error: 'transcript is required' });
+
+    let context = {};
+    if (appointment_id) {
+      const { rows } = await db.query(`
+        SELECT
+          c.full_name AS client_name,
+          s.description AS service_name,
+          cl.full_name AS clinician_name,
+          d.icd10_code AS diagnosis_code,
+          d.description AS diagnosis_description
+        FROM appointments a
+        JOIN clients c ON c.id = a.client_id
+        JOIN services s ON s.id = a.service_id
+        JOIN clinicians cl ON cl.id = a.clinician_id
+        LEFT JOIN diagnoses d ON d.client_id = a.client_id
+        WHERE a.id = $1
+      `, [appointment_id]);
+      if (rows[0]) {
+        context.clientName = rows[0].client_name;
+        context.serviceName = rows[0].service_name;
+        context.clinicianName = rows[0].clinician_name;
+        if (rows[0].diagnosis_code) {
+          context.diagnosisInfo = `${rows[0].diagnosis_code} - ${rows[0].diagnosis_description}`;
+        }
+      }
+    }
+
+    const soap = await generateSOAPNote(transcript, context);
+    res.json(soap);
+  } catch (err) { next(err); }
+});
+
+// POST /api/notes/:id/attach-audio
+router.post('/:id/attach-audio', async (req, res, next) => {
+  try {
+    const { audio_filename, transcript } = req.body;
+    const { rows } = await db.query(`
+      UPDATE notes SET
+        audio_filename = $1,
+        transcript = $2,
+        updated_at = now()
+      WHERE id = $3 RETURNING *
+    `, [audio_filename, transcript, req.params.id]);
+    if (!rows[0]) return res.status(404).json({ error: 'Note not found' });
     res.json(rows[0]);
   } catch (err) { next(err); }
 });
