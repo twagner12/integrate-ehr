@@ -8,6 +8,7 @@ import Calendar from './pages/Calendar.jsx';
 import Invoices from './pages/Invoices.jsx';
 import Settings from './pages/Settings.jsx';
 import Reports from './pages/Reports.jsx';
+import Record from './pages/Record.jsx';
 import PortalHome from './pages/portal/PortalHome.jsx';
 import PortalChild from './pages/portal/PortalChild.jsx';
 import PortalAppointments from './pages/portal/PortalAppointments.jsx';
@@ -38,6 +39,14 @@ export default function App() {
         {/* Role-based root redirect */}
         <Route index element={
           <ProtectedRoute><RoleRouter /></ProtectedRoute>
+        } />
+
+        {/* Mobile recording page (standalone, no Layout) */}
+        <Route path="/record" element={
+          <ProtectedRoute><Record /></ProtectedRoute>
+        } />
+        <Route path="/record/:appointmentId" element={
+          <ProtectedRoute><Record /></ProtectedRoute>
         } />
 
         {/* Staff app */}
