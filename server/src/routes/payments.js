@@ -1,6 +1,7 @@
 import { Router } from 'express';
 import Stripe from 'stripe';
 import { db } from '../db/index.js';
+import { sendSuperbillForInvoice } from '../routes/invoices.js';
 
 const router = Router();
 
@@ -152,11 +153,18 @@ router.get('/card/:clientId', async (req, res, next) => {
     }
 
     const methods = await stripe.customers.listPaymentMethods(
-      rows[0].stripe_customer_id, { type: 'card', limit: 1 }
+      rows[0].stripe_customer_id, { type: 'card' }
     );
 
     if (methods.data.length === 0) {
       return res.json({ has_card: false });
+    }
+
+    // Keep only the most recent card, detach older ones
+    if (methods.data.length > 1) {
+      for (const old of methods.data.slice(1)) {
+        await stripe.paymentMethods.detach(old.id);
+      }
     }
 
     const card = methods.data[0].card;
@@ -196,13 +204,20 @@ router.post('/charge/:invoiceId', async (req, res, next) => {
       return res.status(400).json({ error: 'No card on file. Send a card setup link first.' });
     }
 
-    // Get the default payment method
+    // Get payment methods, keep only the most recent
     const methods = await stripe.customers.listPaymentMethods(
-      invoice.stripe_customer_id, { type: 'card', limit: 1 }
+      invoice.stripe_customer_id, { type: 'card' }
     );
 
     if (methods.data.length === 0) {
       return res.status(400).json({ error: 'No card on file. Send a card setup link first.' });
+    }
+
+    // Detach older cards, use the newest
+    if (methods.data.length > 1) {
+      for (const old of methods.data.slice(1)) {
+        await stripe.paymentMethods.detach(old.id);
+      }
     }
 
     const balance = parseFloat(invoice.total || 0) - parseFloat(invoice.amount_paid || 0);
@@ -242,6 +257,11 @@ router.post('/charge/:invoiceId', async (req, res, next) => {
         WHERE invoice_id = $1 AND appointment_id IS NOT NULL
       )
     `, [invoice.id]);
+
+    // Auto-send superbill after payment
+    sendSuperbillForInvoice(invoice.id).catch(err =>
+      console.error('Failed to send superbill:', err.message)
+    );
 
     res.json({ success: true, payment_intent_id: paymentIntent.id });
   } catch (err) {
@@ -300,6 +320,11 @@ export async function handleStripeWebhook(req, res) {
       `, [invoiceId]);
 
       console.log(`Invoice #${invoiceId} marked as paid via Stripe`);
+
+      // Auto-send superbill after payment
+      sendSuperbillForInvoice(invoiceId).catch(err =>
+        console.error('Failed to send superbill:', err.message)
+      );
     }
   }
 
@@ -316,7 +341,7 @@ export async function handleStripeWebhook(req, res) {
 
 async function getInvoiceIdFromPI(paymentIntentId) {
   const { rows } = await db.query(
-    'SELECT id FROM invoices WHERE stripe_payment_intent_id = $1 OR stripe_checkout_session_id = $1',
+    'SELECT id FROM invoices WHERE stripe_payment_intent_id = $1',
     [paymentIntentId]
   );
   return rows[0]?.id || null;

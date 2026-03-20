@@ -17,11 +17,19 @@ export const requireAdmin = (req, res, next) => {
   next();
 };
 
-// Restrict to staff (any role)
+// Restrict to staff or admin
 export const requireStaff = (req, res, next) => {
   const role = getRole(req);
-  if (!role) {
+  if (role !== 'staff' && role !== 'admin') {
     return res.status(403).json({ error: 'Staff access required' });
+  }
+  next();
+};
+
+// Restrict to parent portal users
+export const requireParent = (req, res, next) => {
+  if (getRole(req) !== 'parent') {
+    return res.status(403).json({ error: 'Parent portal access required' });
   }
   next();
 };

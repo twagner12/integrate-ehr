@@ -1163,6 +1163,18 @@ function InvoiceDetailModal({ invoiceId, onClose, onRefresh }) {
     } catch (err) { alert(err.message); }
   };
 
+  const [sending, setSending] = useState(false);
+  const handleSendInvoice = async () => {
+    if (!confirm(`Email invoice #${invoice.invoice_number} with superbill and payment link to the responsible party?`)) return;
+    setSending(true);
+    try {
+      const result = await api.post(`/invoices/${invoiceId}/send`);
+      alert(`Invoice sent to ${result.sent_to}`);
+      await load();
+    } catch (err) { alert(err.message); }
+    finally { setSending(false); }
+  };
+
   const handleDownloadPdf = async () => {
     const blob = await pdf(<InvoicePdf invoice={invoice} />).toBlob();
     const url = URL.createObjectURL(blob);
@@ -1182,6 +1194,17 @@ function InvoiceDetailModal({ invoiceId, onClose, onRefresh }) {
     a.download = `Superbill-${invoice.invoice_number}.pdf`;
     a.click();
     URL.revokeObjectURL(url);
+  };
+
+  const [sendingSb, setSendingSb] = useState(false);
+  const handleSendSuperbill = async () => {
+    if (!confirm(`Email superbill for invoice #${invoice.invoice_number} to the responsible party?`)) return;
+    setSendingSb(true);
+    try {
+      const result = await api.post(`/invoices/${invoiceId}/send-superbill`);
+      alert(`Superbill sent to ${result.sent_to}`);
+    } catch (err) { alert(err.message); }
+    finally { setSendingSb(false); }
   };
 
   const handleDelete = async () => {
@@ -1223,6 +1246,10 @@ function InvoiceDetailModal({ invoiceId, onClose, onRefresh }) {
                       className="bg-brand-500 text-white text-sm font-medium px-3 py-1.5 rounded-lg hover:bg-brand-600 disabled:opacity-50">
                       {saving ? 'Charging...' : 'Charge card'}
                     </button>
+                    <button onClick={handleSendInvoice} disabled={sending}
+                      className="bg-blue-500 text-white text-sm font-medium px-3 py-1.5 rounded-lg hover:bg-blue-600 disabled:opacity-50">
+                      {sending ? 'Sending...' : 'Send invoice'}
+                    </button>
                     <button onClick={handlePaymentLink}
                       className="border border-brand-300 text-brand-600 text-sm font-medium px-3 py-1.5 rounded-lg hover:bg-brand-50">
                       Payment link
@@ -1239,7 +1266,11 @@ function InvoiceDetailModal({ invoiceId, onClose, onRefresh }) {
                 </button>
                 <button onClick={handleDownloadSuperbill}
                   className="border border-gray-300 text-gray-700 text-sm font-medium px-3 py-1.5 rounded-lg hover:bg-gray-50">
-                  Superbill
+                  Superbill PDF
+                </button>
+                <button onClick={handleSendSuperbill} disabled={sendingSb}
+                  className="border border-gray-300 text-gray-700 text-sm font-medium px-3 py-1.5 rounded-lg hover:bg-gray-50 disabled:opacity-50">
+                  {sendingSb ? 'Sending...' : 'Email superbill'}
                 </button>
                 <button onClick={() => setEditing(true)}
                   className="border border-gray-300 text-gray-700 text-sm font-medium px-3 py-1.5 rounded-lg hover:bg-gray-50">

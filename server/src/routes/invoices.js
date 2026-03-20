@@ -1,6 +1,11 @@
 import { Router } from 'express';
+import Stripe from 'stripe';
 import { db } from '../db/index.js';
 import pool from '../db/index.js';
+import { generateInvoicePdf, generateSuperbillPdf } from '../services/pdf.js';
+import { sendInvoiceEmail, sendSuperbillEmail } from '../services/email.js';
+
+const stripe = process.env.STRIPE_SECRET_KEY ? new Stripe(process.env.STRIPE_SECRET_KEY) : null;
 
 const router = Router();
 
@@ -61,9 +66,9 @@ router.get('/preview', async (req, res, next) => {
         AND a.starts_at <= $2
         AND a.status    IN ('Show', 'No Show', 'Late Cancel')
         AND a.billing_status = 'Uninvoiced'
-        ${client_id ? `AND a.client_id = ${parseInt(client_id)}` : ''}
+        ${client_id ? `AND a.client_id = $3` : ''}
       ORDER BY c.last_name ASC, a.starts_at ASC
-    `, [start, end + 'T23:59:59']);
+    `, client_id ? [start, end + 'T23:59:59', client_id] : [start, end + 'T23:59:59']);
     res.json(rows);
   } catch (err) { next(err); }
 });
@@ -161,10 +166,10 @@ router.post('/generate', async (req, res, next) => {
     for (const item of line_items) {
       await pgClient.query(`
         INSERT INTO invoice_items
-          (invoice_id, appointment_id, service_date, description, amount, is_no_show)
-        VALUES ($1,$2,$3,$4,$5,$6)
+          (invoice_id, appointment_id, service_date, description, amount, is_no_show, cpt_code)
+        VALUES ($1,$2,$3,$4,$5,$6,$7)
       `, [invoice.id, item.appointment_id || null, item.service_date,
-          item.description, item.amount, item.is_no_show || false]);
+          item.description, item.amount, item.is_no_show || false, item.cpt_code || null]);
       if (item.appointment_id) apptIds.push(item.appointment_id);
     }
 
@@ -272,6 +277,203 @@ router.delete('/:id', async (req, res, next) => {
     res.json({ deleted: true });
   } catch (err) { await pgClient.query('ROLLBACK'); next(err); }
   finally { pgClient.release(); }
+});
+
+// ── Shared: fetch full invoice data ───────────────────────────────────────────
+async function getFullInvoice(invoiceId) {
+  const { rows: invRows } = await db.query(`
+    SELECT
+      i.*,
+      c.full_name        AS client_name,
+      c.date_of_birth    AS client_dob,
+      cl.full_name       AS clinician_name,
+      cl.npi_number,
+      cl.phone           AS clinician_phone,
+      cl.license_number,
+      cs.practice_name,
+      cs.address_line1,
+      cs.address_line2,
+      cs.city,
+      cs.state,
+      cs.zip,
+      cs.tax_id,
+      cs.logo_data,
+      (SELECT p.first_name || ' ' || p.last_name FROM people p
+       JOIN client_contacts cc ON cc.person_id = p.id
+       WHERE cc.client_id = i.client_id AND cc.is_responsible_party = true LIMIT 1
+      ) AS responsible_party_name,
+      (SELECT p.phone_primary FROM people p
+       JOIN client_contacts cc ON cc.person_id = p.id
+       WHERE cc.client_id = i.client_id AND cc.is_responsible_party = true LIMIT 1
+      ) AS responsible_party_phone,
+      (SELECT p.email FROM people p
+       JOIN client_contacts cc ON cc.person_id = p.id
+       WHERE cc.client_id = i.client_id AND cc.is_responsible_party = true LIMIT 1
+      ) AS responsible_party_email
+    FROM invoices i
+    JOIN clients         c   ON c.id  = i.client_id
+    LEFT JOIN clinicians cl  ON cl.id = i.clinician_id
+    LEFT JOIN clinic_settings cs ON cs.id = 1
+    WHERE i.id = $1
+  `, [invoiceId]);
+
+  if (!invRows[0]) return null;
+  const invoice = invRows[0];
+
+  const { rows: items } = await db.query(
+    'SELECT * FROM invoice_items WHERE invoice_id = $1 ORDER BY service_date ASC',
+    [invoiceId]
+  );
+  invoice.items = items;
+  invoice.balance = parseFloat(invoice.total || 0) - parseFloat(invoice.amount_paid || 0);
+
+  return invoice;
+}
+
+// ── Shared: send superbill after payment ─────────────────────────────────────
+export async function sendSuperbillForInvoice(invoiceId) {
+  if (!process.env.RESEND_API_KEY) return;
+
+  const invoice = await getFullInvoice(invoiceId);
+  if (!invoice) return;
+
+  const billingEmail = invoice.responsible_party_email;
+  if (!billingEmail) return;
+
+  const { rows: diagnoses } = await db.query(
+    'SELECT icd10_code, description FROM diagnoses WHERE client_id = $1 AND removed_at IS NULL ORDER BY created_at ASC',
+    [invoice.client_id]
+  );
+
+  if (diagnoses.length === 0) return;
+
+  const superbillPdf = await generateSuperbillPdf(invoice, diagnoses);
+  const parentName = invoice.responsible_party_name || invoice.client_name;
+
+  await sendSuperbillEmail({
+    to: billingEmail,
+    parentName,
+    clientName: invoice.client_name,
+    invoice,
+    superbillPdf,
+  });
+
+  console.log(`Superbill emailed for invoice #${invoice.invoice_number} to ${billingEmail}`);
+}
+
+// ── POST /api/invoices/:id/send ───────────────────────────────────────────────
+router.post('/:id/send', async (req, res, next) => {
+  try {
+    if (!process.env.RESEND_API_KEY) {
+      return res.status(503).json({ error: 'Email is not configured. Set RESEND_API_KEY in .env' });
+    }
+
+    const invoice = await getFullInvoice(req.params.id);
+    if (!invoice) return res.status(404).json({ error: 'Invoice not found' });
+
+    const billingEmail = invoice.responsible_party_email;
+    if (!billingEmail) {
+      return res.status(400).json({ error: 'No email on file for the responsible party' });
+    }
+
+    // Generate invoice PDF
+    const invoicePdf = await generateInvoicePdf(invoice);
+
+    // Create a Stripe Checkout payment link (if Stripe is configured and invoice is unpaid)
+    let paymentUrl = null;
+    if (stripe && invoice.status !== 'Paid' && invoice.balance > 0) {
+      const session = await stripe.checkout.sessions.create({
+        mode: 'payment',
+        customer_email: billingEmail,
+        payment_method_types: ['us_bank_account', 'card'],
+        line_items: [{
+          price_data: {
+            currency: 'usd',
+            unit_amount: Math.round(invoice.balance * 100),
+            product_data: {
+              name: `Invoice #${invoice.invoice_number}`,
+              description: `Integrate Language & Literacy — ${invoice.client_name}`,
+            },
+          },
+          quantity: 1,
+        }],
+        payment_intent_data: {
+          metadata: {
+            invoice_id: String(invoice.id),
+            invoice_number: String(invoice.invoice_number),
+          },
+        },
+        success_url: `${process.env.CLIENT_URL || 'http://localhost:5173'}/invoices/${invoice.id}?paid=1`,
+        cancel_url: `${process.env.CLIENT_URL || 'http://localhost:5173'}/invoices/${invoice.id}`,
+      });
+      paymentUrl = session.url;
+
+      await db.query(
+        'UPDATE invoices SET stripe_checkout_session_id = $1, updated_at = now() WHERE id = $2',
+        [session.id, invoice.id]
+      );
+    }
+
+    // Send invoice email (no superbill — that comes after payment)
+    const parentName = invoice.responsible_party_name || invoice.client_name;
+    await sendInvoiceEmail({
+      to: billingEmail,
+      parentName,
+      clientName: invoice.client_name,
+      invoice,
+      paymentUrl,
+      invoicePdf,
+    });
+
+    // Update invoice status to Sent if it was Draft
+    if (invoice.status === 'Draft') {
+      await db.query(
+        "UPDATE invoices SET status = 'Sent', updated_at = now() WHERE id = $1",
+        [invoice.id]
+      );
+    }
+
+    res.json({ success: true, sent_to: billingEmail });
+  } catch (err) { next(err); }
+});
+
+// ── POST /api/invoices/:id/send-superbill ────────────────────────────────────
+router.post('/:id/send-superbill', async (req, res, next) => {
+  try {
+    if (!process.env.RESEND_API_KEY) {
+      return res.status(503).json({ error: 'Email is not configured. Set RESEND_API_KEY in .env' });
+    }
+
+    const invoice = await getFullInvoice(req.params.id);
+    if (!invoice) return res.status(404).json({ error: 'Invoice not found' });
+
+    const billingEmail = invoice.responsible_party_email;
+    if (!billingEmail) {
+      return res.status(400).json({ error: 'No email on file for the responsible party' });
+    }
+
+    const { rows: diagnoses } = await db.query(
+      'SELECT icd10_code, description FROM diagnoses WHERE client_id = $1 AND removed_at IS NULL ORDER BY created_at ASC',
+      [invoice.client_id]
+    );
+
+    if (diagnoses.length === 0) {
+      return res.status(400).json({ error: 'No diagnoses on file for this client' });
+    }
+
+    const superbillPdf = await generateSuperbillPdf(invoice, diagnoses);
+    const parentName = invoice.responsible_party_name || invoice.client_name;
+
+    await sendSuperbillEmail({
+      to: billingEmail,
+      parentName,
+      clientName: invoice.client_name,
+      invoice,
+      superbillPdf,
+    });
+
+    res.json({ success: true, sent_to: billingEmail });
+  } catch (err) { next(err); }
 });
 
 export default router;
