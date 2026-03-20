@@ -194,26 +194,46 @@ router.post('/generate-soap', async (req, res, next) => {
 
     let context = {};
     if (appointment_id) {
+      // Get appointment details
       const { rows } = await db.query(`
         SELECT
+          a.client_id,
           c.full_name AS client_name,
           s.description AS service_name,
-          cl.full_name AS clinician_name,
-          d.icd10_code AS diagnosis_code,
-          d.description AS diagnosis_description
+          s.cpt_code,
+          cl.full_name AS clinician_name
         FROM appointments a
         JOIN clients c ON c.id = a.client_id
         JOIN services s ON s.id = a.service_id
         JOIN clinicians cl ON cl.id = a.clinician_id
-        LEFT JOIN diagnoses d ON d.client_id = a.client_id
         WHERE a.id = $1
       `, [appointment_id]);
+
       if (rows[0]) {
-        context.clientName = rows[0].client_name;
-        context.serviceName = rows[0].service_name;
-        context.clinicianName = rows[0].clinician_name;
-        if (rows[0].diagnosis_code) {
-          context.diagnosisInfo = `${rows[0].diagnosis_code} - ${rows[0].diagnosis_description}`;
+        const appt = rows[0];
+        context.clientName = appt.client_name;
+        context.serviceName = `${appt.service_name} (${appt.cpt_code})`;
+        context.clinicianName = appt.clinician_name;
+
+        // Get all active diagnoses for the client
+        const { rows: dxRows } = await db.query(
+          'SELECT icd10_code, description FROM diagnoses WHERE client_id = $1 AND removed_at IS NULL ORDER BY created_at ASC',
+          [appt.client_id]
+        );
+        if (dxRows.length > 0) {
+          context.diagnoses = dxRows.map(d => `${d.icd10_code} - ${d.description}`).join('; ');
+        }
+
+        // Get the most recent finalized note for continuity
+        const { rows: prevRows } = await db.query(`
+          SELECT n.subjective, n.objective, n.assessment, n.plan
+          FROM notes n
+          JOIN appointments a ON a.id = n.appointment_id
+          WHERE n.client_id = $1 AND n.is_finalized = true
+          ORDER BY a.starts_at DESC LIMIT 1
+        `, [appt.client_id]);
+        if (prevRows[0]) {
+          context.previousNote = prevRows[0];
         }
       }
     }
