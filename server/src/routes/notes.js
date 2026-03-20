@@ -49,6 +49,26 @@ router.get('/', async (req, res, next) => {
   } catch (err) { next(err); }
 });
 
+// GET /api/notes/previous/:clientId — get most recent finalized note for a client
+router.get('/previous/:clientId', async (req, res, next) => {
+  try {
+    const { rows } = await db.query(`
+      SELECT n.subjective, n.objective, n.assessment, n.plan,
+        a.starts_at, s.description AS service_name, cl.full_name AS clinician_name
+      FROM notes n
+      JOIN appointments a ON a.id = n.appointment_id
+      JOIN services s ON s.id = a.service_id
+      JOIN clinicians cl ON cl.id = a.clinician_id
+      WHERE n.client_id = $1
+        AND n.is_finalized = true
+      ORDER BY a.starts_at DESC
+      LIMIT 1
+    `, [req.params.clientId]);
+    if (!rows[0]) return res.status(404).json({ error: 'No previous notes found' });
+    res.json(rows[0]);
+  } catch (err) { next(err); }
+});
+
 // GET /api/notes/:id
 router.get('/:id', async (req, res, next) => {
   try {
