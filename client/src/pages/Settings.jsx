@@ -15,6 +15,9 @@ const NAV = [
     { id: 'services', label: 'Services' },
     { id: 'billing',  label: 'Billing settings' },
   ]},
+  { group: 'AI', items: [
+    { id: 'ai-notes', label: 'AI Notes' },
+  ]},
   { group: 'MY ACCOUNT', items: [
     { id: 'profile',  label: 'Profile' },
     { id: 'security', label: 'Security' },
@@ -192,6 +195,7 @@ function PracticeDetailsSection() {
 const EMPTY_CLINICIAN = {
   first_name: '', last_name: '', npi_number: '',
   license_number: '', credentials: '', phone: '',
+  note_style_instructions: '',
 };
 
 function CliniciansForm({ form, setF }) {
@@ -231,6 +235,22 @@ function CliniciansForm({ form, setF }) {
           onChange={e => setF('phone', formatPhoneInput(e.target.value))}
           className={inputClass} placeholder="847-555-0000" />
       </div>
+      <div className="col-span-2">
+        <label className={labelClass}>
+          AI Note Style Instructions{' '}
+          <span className="text-gray-400 font-normal">(optional)</span>
+        </label>
+        <textarea
+          value={form.note_style_instructions}
+          onChange={e => setF('note_style_instructions', e.target.value)}
+          className={`${inputClass} min-h-[80px]`}
+          placeholder="e.g. Use concise bullet points. Avoid jargon. Always include specific data from the session."
+          rows={3}
+        />
+        <p className="text-xs text-gray-400 mt-1">
+          These instructions guide the AI when drafting SOAP notes for this clinician.
+        </p>
+      </div>
     </div>
   );
 }
@@ -251,12 +271,13 @@ function CliniciansSection() {
   const openNew = () => { setForm(EMPTY_CLINICIAN); setEditingId('new'); };
   const openEdit = (c) => {
     setForm({
-      first_name:     c.first_name     || '',
-      last_name:      c.last_name      || '',
-      npi_number:     c.npi_number     || '',
-      license_number: c.license_number || '',
-      credentials:    c.credentials   || '',
-      phone:          c.phone          || '',
+      first_name:             c.first_name             || '',
+      last_name:              c.last_name              || '',
+      npi_number:             c.npi_number             || '',
+      license_number:         c.license_number         || '',
+      credentials:            c.credentials            || '',
+      phone:                  c.phone                  || '',
+      note_style_instructions: c.note_style_instructions || '',
     });
     setEditingId(c.id);
   };
@@ -708,6 +729,269 @@ function SecuritySection() {
   );
 }
 
+// ── AI Notes ──────────────────────────────────────────────────────────────────
+const EMPTY_EXAMPLE = {
+  label: '', service_type: '', subjective: '', objective: '', assessment: '', plan: '',
+};
+
+function ExampleNotesTab() {
+  const api = useApi();
+  const [examples, setExamples] = useState([]);
+  const [loading, setLoading] = useState(true);
+  const [showForm, setShowForm] = useState(false);
+  const [form, setForm] = useState(EMPTY_EXAMPLE);
+  const [saving, setSaving] = useState(false);
+  const [deleting, setDeleting] = useState(null);
+
+  const load = () => {
+    api.get('/notes/examples').then(setExamples).finally(() => setLoading(false));
+  };
+  useEffect(() => { load(); }, []);
+
+  const setF = (field, value) => setForm(f => ({ ...f, [field]: value }));
+
+  const handleSave = async () => {
+    if (!form.label) { alert('Label is required.'); return; }
+    setSaving(true);
+    try {
+      await api.post('/notes/examples', form);
+      setForm(EMPTY_EXAMPLE);
+      setShowForm(false);
+      load();
+    } catch (err) { alert(err.message); } finally { setSaving(false); }
+  };
+
+  const handleDelete = async (id) => {
+    if (!confirm('Delete this example note? This cannot be undone.')) return;
+    setDeleting(id);
+    try {
+      await api.delete(`/notes/examples/${id}`);
+      load();
+    } catch (err) { alert(err.message); } finally { setDeleting(null); }
+  };
+
+  const truncate = (text, max = 80) => {
+    if (!text) return '—';
+    return text.length > max ? text.slice(0, max) + '...' : text;
+  };
+
+  return (
+    <SectionCard
+      title="Example Notes"
+      description="Few-shot examples that train the AI to write notes in your style"
+      action={!showForm && (
+        <button onClick={() => { setForm(EMPTY_EXAMPLE); setShowForm(true); }}
+          className="bg-brand-500 text-white text-sm font-medium px-3 py-1.5 rounded-lg hover:bg-brand-600 transition-colors">
+          + Add example
+        </button>
+      )}
+    >
+      {showForm && (
+        <div className="px-6 py-5 border-b border-gray-100 bg-gray-50">
+          <p className="text-sm font-semibold text-gray-700 mb-4">New example note</p>
+          <div className="space-y-3">
+            <div className="grid grid-cols-2 gap-3">
+              <div>
+                <label className={labelClass}>Label *</label>
+                <input type="text" value={form.label}
+                  onChange={e => setF('label', e.target.value)}
+                  className={inputClass} placeholder="Articulation session - typical" />
+              </div>
+              <div>
+                <label className={labelClass}>
+                  Service type{' '}
+                  <span className="text-gray-400 font-normal">(optional)</span>
+                </label>
+                <input type="text" value={form.service_type}
+                  onChange={e => setF('service_type', e.target.value)}
+                  className={inputClass} placeholder="92507" />
+              </div>
+            </div>
+            {['subjective', 'objective', 'assessment', 'plan'].map(field => (
+              <div key={field}>
+                <label className={labelClass}>{field.charAt(0).toUpperCase() + field.slice(1)}</label>
+                <textarea value={form[field]}
+                  onChange={e => setF(field, e.target.value)}
+                  className={`${inputClass} min-h-[60px]`} rows={3} />
+              </div>
+            ))}
+          </div>
+          <div className="flex gap-2 mt-4">
+            <button onClick={handleSave} disabled={saving}
+              className="bg-brand-500 text-white text-sm font-medium px-4 py-2 rounded-lg hover:bg-brand-600 disabled:opacity-50 transition-colors">
+              {saving ? 'Saving...' : 'Save example'}
+            </button>
+            <button onClick={() => setShowForm(false)}
+              className="text-sm font-medium text-gray-600 px-4 py-2 rounded-lg hover:bg-gray-100 transition-colors">
+              Cancel
+            </button>
+          </div>
+        </div>
+      )}
+      {loading ? (
+        <p className="text-sm text-gray-400 px-6 py-4">Loading...</p>
+      ) : examples.length === 0 ? (
+        <p className="text-sm text-gray-400 px-6 py-4">No example notes yet. Add one to help the AI learn your style.</p>
+      ) : (
+        <ul className="divide-y divide-gray-100">
+          {examples.map(ex => (
+            <li key={ex.id} className="px-6 py-4">
+              <div className="flex items-start justify-between">
+                <div className="flex-1 min-w-0">
+                  <div className="flex items-center gap-2">
+                    <span className="text-sm font-medium text-gray-900">{ex.label}</span>
+                    {ex.service_type && (
+                      <span className="font-mono text-xs bg-gray-100 text-gray-600 px-2 py-0.5 rounded-full">{ex.service_type}</span>
+                    )}
+                  </div>
+                  <div className="mt-2 grid grid-cols-2 gap-x-4 gap-y-1 text-xs text-gray-500">
+                    <div><span className="font-semibold text-gray-600">S:</span> {truncate(ex.subjective)}</div>
+                    <div><span className="font-semibold text-gray-600">O:</span> {truncate(ex.objective)}</div>
+                    <div><span className="font-semibold text-gray-600">A:</span> {truncate(ex.assessment)}</div>
+                    <div><span className="font-semibold text-gray-600">P:</span> {truncate(ex.plan)}</div>
+                  </div>
+                </div>
+                <button onClick={() => handleDelete(ex.id)} disabled={deleting === ex.id}
+                  className="text-xs text-gray-400 hover:text-red-500 transition-colors ml-4 shrink-0">
+                  {deleting === ex.id ? 'Deleting...' : 'Delete'}
+                </button>
+              </div>
+            </li>
+          ))}
+        </ul>
+      )}
+    </SectionCard>
+  );
+}
+
+function AIFeedbackTab() {
+  const api = useApi();
+  const [feedback, setFeedback] = useState([]);
+  const [loading, setLoading] = useState(true);
+
+  useEffect(() => {
+    api.get('/notes/ai-feedback').then(setFeedback).finally(() => setLoading(false));
+  }, []);
+
+  const SECTIONS = ['subjective', 'objective', 'assessment', 'plan'];
+
+  // Calculate summary stats
+  const totalSections = feedback.length * SECTIONS.length;
+  const unchangedSections = feedback.reduce((count, entry) => {
+    return count + SECTIONS.filter(s => entry[`ai_draft_${s}`] === entry[s]).length;
+  }, 0);
+  const unchangedPct = totalSections > 0 ? Math.round((unchangedSections / totalSections) * 100) : 0;
+
+  if (loading) return (
+    <div className="bg-white rounded-xl border border-gray-200 p-6 text-sm text-gray-400">Loading...</div>
+  );
+
+  return (
+    <div className="space-y-4">
+      {/* Summary stat */}
+      {feedback.length > 0 && (
+        <div className="bg-white rounded-xl border border-gray-200 px-6 py-4 flex items-center gap-3">
+          <div className={`text-2xl font-bold ${unchangedPct >= 80 ? 'text-green-600' : unchangedPct >= 50 ? 'text-amber-600' : 'text-red-500'}`}>
+            {unchangedPct}%
+          </div>
+          <div>
+            <p className="text-sm font-medium text-gray-900">of sections unchanged</p>
+            <p className="text-xs text-gray-500">{unchangedSections} of {totalSections} SOAP sections accepted as-is across {feedback.length} notes</p>
+          </div>
+        </div>
+      )}
+
+      {feedback.length === 0 ? (
+        <div className="bg-white rounded-xl border border-gray-200 p-6">
+          <p className="text-sm text-gray-400">No finalized notes with AI drafts yet.</p>
+        </div>
+      ) : (
+        feedback.map(entry => {
+          const date = entry.session_date ? new Date(entry.session_date).toLocaleDateString() : '—';
+          return (
+            <div key={entry.id} className="bg-white rounded-xl border border-gray-200">
+              <div className="flex items-center justify-between px-6 py-3 border-b border-gray-200">
+                <div className="flex items-center gap-2 text-sm">
+                  <span className="font-medium text-gray-900">{entry.client_name || '—'}</span>
+                  <span className="text-gray-400">&middot;</span>
+                  <span className="text-gray-600">{entry.clinician_name || '—'}</span>
+                  <span className="text-gray-400">&middot;</span>
+                  <span className="text-gray-500">{date}</span>
+                </div>
+                {entry.prompt_version && (
+                  <span className="text-xs font-mono bg-gray-100 text-gray-600 px-2 py-0.5 rounded-full">
+                    Prompt v{entry.prompt_version}
+                  </span>
+                )}
+              </div>
+              <div className="divide-y divide-gray-100">
+                {SECTIONS.map(s => {
+                  const aiText = entry[`ai_draft_${s}`] || '';
+                  const finalText = entry[s] || '';
+                  const changed = aiText !== finalText;
+                  return (
+                    <div key={s} className="grid grid-cols-2 divide-x divide-gray-100">
+                      <div className={`px-4 py-3 ${changed ? 'border-l-2 border-l-amber-400' : 'border-l-2 border-l-green-400'}`}>
+                        <div className="flex items-center gap-1.5 mb-1">
+                          <span className="text-xs font-semibold text-gray-500 uppercase">{s.charAt(0)}</span>
+                          <span className="text-[10px] text-gray-400">AI Draft</span>
+                          {!changed && <span className="text-green-500 text-xs" title="Unchanged">&#10003;</span>}
+                          {changed && <span className="text-amber-500 text-xs" title="Edited">&#9998;</span>}
+                        </div>
+                        <p className="text-xs text-gray-700 whitespace-pre-wrap">{aiText || '—'}</p>
+                      </div>
+                      <div className={`px-4 py-3 ${changed ? 'border-l-2 border-l-amber-400' : 'border-l-2 border-l-green-400'}`}>
+                        <div className="flex items-center gap-1.5 mb-1">
+                          <span className="text-xs font-semibold text-gray-500 uppercase">{s.charAt(0)}</span>
+                          <span className="text-[10px] text-gray-400">Final</span>
+                        </div>
+                        <p className="text-xs text-gray-700 whitespace-pre-wrap">{finalText || '—'}</p>
+                      </div>
+                    </div>
+                  );
+                })}
+              </div>
+            </div>
+          );
+        })
+      )}
+    </div>
+  );
+}
+
+function AINotesSection() {
+  const [tab, setTab] = useState('examples');
+
+  return (
+    <div>
+      {/* Tab switcher */}
+      <div className="flex gap-1 mb-4 bg-gray-100 rounded-lg p-1 w-fit">
+        <button
+          onClick={() => setTab('examples')}
+          className={`px-4 py-1.5 rounded-md text-sm font-medium transition-colors ${
+            tab === 'examples'
+              ? 'bg-white text-gray-900 shadow-sm'
+              : 'text-gray-500 hover:text-gray-700'
+          }`}>
+          Example Notes
+        </button>
+        <button
+          onClick={() => setTab('feedback')}
+          className={`px-4 py-1.5 rounded-md text-sm font-medium transition-colors ${
+            tab === 'feedback'
+              ? 'bg-white text-gray-900 shadow-sm'
+              : 'text-gray-500 hover:text-gray-700'
+          }`}>
+          AI Feedback
+        </button>
+      </div>
+
+      {tab === 'examples' && <ExampleNotesTab />}
+      {tab === 'feedback' && <AIFeedbackTab />}
+    </div>
+  );
+}
+
 // ── Main ──────────────────────────────────────────────────────────────────────
 export default function Settings() {
   const [section, setSection] = useState('practice-details');
@@ -746,6 +1030,7 @@ export default function Settings() {
           {section === 'clinicians'        && <CliniciansSection />}
           {section === 'services'          && <ServicesSection />}
           {section === 'billing'           && <BillingSettingsSection />}
+          {section === 'ai-notes'          && <AINotesSection />}
           {section === 'profile'           && <ProfileSection />}
           {section === 'security'          && <SecuritySection />}
         </div>

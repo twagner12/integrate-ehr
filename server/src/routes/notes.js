@@ -49,6 +49,59 @@ router.get('/', async (req, res, next) => {
   } catch (err) { next(err); }
 });
 
+// GET /api/notes/ai-feedback — AI drafts vs final versions for feedback analysis
+router.get('/ai-feedback', async (req, res, next) => {
+  try {
+    const { rows } = await db.query(`
+      SELECT
+        n.id,
+        n.subjective, n.objective, n.assessment, n.plan,
+        n.ai_draft_subjective, n.ai_draft_objective, n.ai_draft_assessment, n.ai_draft_plan,
+        n.ai_prompt_version, n.ai_generated_at, n.finalized_at,
+        c.full_name AS client_name,
+        cl.full_name AS clinician_name
+      FROM notes n
+      JOIN clients c ON c.id = n.client_id
+      JOIN appointments a ON a.id = n.appointment_id
+      JOIN clinicians cl ON cl.id = a.clinician_id
+      WHERE n.ai_draft_subjective IS NOT NULL
+        AND n.is_finalized = true
+      ORDER BY n.finalized_at DESC
+      LIMIT 50
+    `);
+    res.json(rows);
+  } catch (err) { next(err); }
+});
+
+// GET /api/notes/examples
+router.get('/examples', async (req, res, next) => {
+  try {
+    const { rows } = await db.query('SELECT * FROM note_examples ORDER BY created_at ASC');
+    res.json(rows);
+  } catch (err) { next(err); }
+});
+
+// POST /api/notes/examples
+router.post('/examples', async (req, res, next) => {
+  try {
+    const { label, transcript, subjective, objective, assessment, plan, service_type } = req.body;
+    const { rows } = await db.query(
+      `INSERT INTO note_examples (label, transcript, subjective, objective, assessment, plan, service_type)
+       VALUES ($1,$2,$3,$4,$5,$6,$7) RETURNING *`,
+      [label, transcript || null, subjective, objective, assessment, plan, service_type || null]
+    );
+    res.status(201).json(rows[0]);
+  } catch (err) { next(err); }
+});
+
+// DELETE /api/notes/examples/:id
+router.delete('/examples/:id', async (req, res, next) => {
+  try {
+    await db.query('DELETE FROM note_examples WHERE id = $1', [req.params.id]);
+    res.json({ success: true });
+  } catch (err) { next(err); }
+});
+
 // GET /api/notes/previous/:clientId — get most recent finalized note for a client
 router.get('/previous/:clientId', async (req, res, next) => {
   try {
@@ -113,12 +166,24 @@ router.get('/appointment/:appointmentId', async (req, res, next) => {
 // POST /api/notes
 router.post('/', async (req, res, next) => {
   try {
-    const { appointment_id, client_id, subjective, objective, assessment, plan } = req.body;
+    const {
+      appointment_id, client_id, subjective, objective, assessment, plan,
+      ai_draft_subjective, ai_draft_objective, ai_draft_assessment, ai_draft_plan,
+      ai_prompt_version, ai_generated_at
+    } = req.body;
     const { rows } = await db.query(`
-      INSERT INTO notes (appointment_id, client_id, subjective, objective, assessment, plan, is_finalized)
-      VALUES ($1, $2, $3, $4, $5, $6, false)
+      INSERT INTO notes (
+        appointment_id, client_id, subjective, objective, assessment, plan, is_finalized,
+        ai_draft_subjective, ai_draft_objective, ai_draft_assessment, ai_draft_plan,
+        ai_prompt_version, ai_generated_at
+      )
+      VALUES ($1, $2, $3, $4, $5, $6, false, $7, $8, $9, $10, $11, $12)
       RETURNING *
-    `, [appointment_id, client_id, subjective || '', objective || '', assessment || '', plan || '']);
+    `, [
+      appointment_id, client_id, subjective || '', objective || '', assessment || '', plan || '',
+      ai_draft_subjective || null, ai_draft_objective || null, ai_draft_assessment || null, ai_draft_plan || null,
+      ai_prompt_version || null, ai_generated_at || null
+    ]);
     res.status(201).json(rows[0]);
   } catch (err) { next(err); }
 });
@@ -126,22 +191,39 @@ router.post('/', async (req, res, next) => {
 // PATCH /api/notes/:id
 router.patch('/:id', async (req, res, next) => {
   try {
-    const { subjective, objective, assessment, plan } = req.body;
+    const {
+      subjective, objective, assessment, plan,
+      ai_draft_subjective, ai_draft_objective, ai_draft_assessment, ai_draft_plan,
+      ai_prompt_version, ai_generated_at
+    } = req.body;
 
     // Block edits on finalized notes
     const { rows: check } = await db.query('SELECT is_finalized FROM notes WHERE id = $1', [req.params.id]);
     if (!check[0]) return res.status(404).json({ error: 'Note not found' });
     if (check[0].is_finalized) return res.status(403).json({ error: 'Note is finalized. Unlock it to edit.' });
 
+    // Build dynamic SET clause — always update SOAP fields, only update AI fields if explicitly provided
+    const setClauses = [
+      'subjective = COALESCE($1, subjective)',
+      'objective = COALESCE($2, objective)',
+      'assessment = COALESCE($3, assessment)',
+      'plan = COALESCE($4, plan)',
+      'updated_at = now()',
+    ];
+    const params = [subjective, objective, assessment, plan];
+
+    if (ai_draft_subjective !== undefined) { params.push(ai_draft_subjective); setClauses.push(`ai_draft_subjective = $${params.length}`); }
+    if (ai_draft_objective !== undefined) { params.push(ai_draft_objective); setClauses.push(`ai_draft_objective = $${params.length}`); }
+    if (ai_draft_assessment !== undefined) { params.push(ai_draft_assessment); setClauses.push(`ai_draft_assessment = $${params.length}`); }
+    if (ai_draft_plan !== undefined) { params.push(ai_draft_plan); setClauses.push(`ai_draft_plan = $${params.length}`); }
+    if (ai_prompt_version !== undefined) { params.push(ai_prompt_version); setClauses.push(`ai_prompt_version = $${params.length}`); }
+    if (ai_generated_at !== undefined) { params.push(ai_generated_at); setClauses.push(`ai_generated_at = $${params.length}`); }
+
+    params.push(req.params.id);
     const { rows } = await db.query(`
-      UPDATE notes SET
-        subjective = COALESCE($1, subjective),
-        objective = COALESCE($2, objective),
-        assessment = COALESCE($3, assessment),
-        plan = COALESCE($4, plan),
-        updated_at = now()
-      WHERE id = $5 RETURNING *
-    `, [subjective, objective, assessment, plan, req.params.id]);
+      UPDATE notes SET ${setClauses.join(', ')}
+      WHERE id = $${params.length} RETURNING *
+    `, params);
     res.json(rows[0]);
   } catch (err) { next(err); }
 });
@@ -235,11 +317,29 @@ router.post('/generate-soap', async (req, res, next) => {
         if (prevRows[0]) {
           context.previousNote = prevRows[0];
         }
+
+        // Get few-shot examples
+        const { rows: exampleRows } = await db.query(
+          'SELECT subjective, objective, assessment, plan FROM note_examples WHERE active = true ORDER BY created_at ASC LIMIT 5'
+        );
+        if (exampleRows.length > 0) {
+          context.examples = exampleRows;
+        }
+
+        // Get clinician style preferences
+        const { rows: clinRows } = await db.query(
+          'SELECT note_style_instructions FROM clinicians WHERE id = (SELECT clinician_id FROM appointments WHERE id = $1)',
+          [appointment_id]
+        );
+        if (clinRows[0]?.note_style_instructions) {
+          context.clinicianStyle = clinRows[0].note_style_instructions;
+        }
       }
     }
 
     const soap = await generateSOAPNote(transcript, context);
-    res.json(soap);
+    const { _promptVersion, ...soapFields } = soap;
+    res.json({ ...soapFields, _promptVersion });
   } catch (err) { next(err); }
 });
 

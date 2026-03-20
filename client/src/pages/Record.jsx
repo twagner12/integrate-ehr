@@ -90,6 +90,12 @@ function RecordSession({ appointmentId }) {
         objective: soapData.objective,
         assessment: soapData.assessment,
         plan: soapData.plan,
+        ai_draft_subjective: soapData.subjective,
+        ai_draft_objective: soapData.objective,
+        ai_draft_assessment: soapData.assessment,
+        ai_draft_plan: soapData.plan,
+        ai_prompt_version: soapData._promptVersion,
+        ai_generated_at: new Date().toISOString(),
       });
       setSaved(true);
     } catch (err) {
@@ -181,7 +187,7 @@ function TodaySessions() {
     let cancelled = false;
     async function load() {
       try {
-        const data = await api.get(`/appointments?start=${today}&end=${today}`);
+        const data = await api.get(`/appointments?start=${today}&end=${today}T23:59:59`);
         if (!cancelled) setAppointments(data);
       } catch (err) {
         if (!cancelled) setError(err.message);

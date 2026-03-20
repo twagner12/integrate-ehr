@@ -56,21 +56,24 @@ function NoteEditor({ note, onSaved, onCancel, isAdmin }) {
   };
 
   const [showAI, setShowAI] = useState(false);
+  const [aiDraft, setAiDraft] = useState(null);
 
-  const handleAIGenerated = ({ subjective, objective, assessment, plan }) => {
+  const handleAIGenerated = ({ subjective, objective, assessment, plan, _promptVersion }) => {
     const hasContent = form.subjective || form.objective || form.assessment || form.plan;
     if (hasContent && !confirm('Replace existing note content with AI-generated draft?')) return;
     setForm({ subjective: subjective || '', objective: objective || '', assessment: assessment || '', plan: plan || '' });
+    setAiDraft({ ai_draft_subjective: subjective, ai_draft_objective: objective, ai_draft_assessment: assessment, ai_draft_plan: plan, ai_prompt_version: _promptVersion, ai_generated_at: new Date().toISOString() });
     setShowAI(false);
   };
 
   const handleSave = async () => {
     setSaving(true);
     try {
+      const payload = { ...form, ...(aiDraft || {}) };
       if (note?.id) {
-        await api.patch(`/notes/${note.id}`, form);
+        await api.patch(`/notes/${note.id}`, payload);
       } else {
-        await api.post('/notes', { ...form, appointment_id: note.appointment_id, client_id: note.client_id });
+        await api.post('/notes', { ...payload, appointment_id: note.appointment_id, client_id: note.client_id });
       }
       onSaved();
     } catch (err) { alert(err.message); }

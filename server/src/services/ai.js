@@ -2,6 +2,8 @@ import Anthropic from '@anthropic-ai/sdk';
 import OpenAI from 'openai';
 import fs from 'fs';
 
+const PROMPT_VERSION = '2.0';
+
 const openai = process.env.OPENAI_API_KEY ? new OpenAI() : null;
 const anthropic = process.env.ANTHROPIC_API_KEY ? new Anthropic() : null;
 
@@ -98,7 +100,7 @@ For the Plan section:
 export async function generateSOAPNote(transcript, context = {}) {
   if (!anthropic) throw new Error('Anthropic not configured. Set ANTHROPIC_API_KEY in .env');
 
-  const { clientName, serviceName, clinicianName, diagnoses, previousNote } = context;
+  const { clientName, serviceName, clinicianName, diagnoses, previousNote, examples, clinicianStyle } = context;
 
   // ── Pass 1: Extract clinical observations from raw transcript ──────────
   const extractionMessage = await anthropic.messages.create({
@@ -157,10 +159,19 @@ A: ${previousNote.assessment || 'N/A'}
 P: ${previousNote.plan || 'N/A'}`;
   }
 
+  // Build few-shot examples section
+  let examplesSection = '';
+  if (examples && examples.length > 0) {
+    const exampleEntries = examples.map((ex, i) =>
+      `Example ${i + 1}:\nS: ${ex.subjective}\nO: ${ex.objective}\nA: ${ex.assessment}\nP: ${ex.plan}`
+    ).join('\n\n');
+    examplesSection = `\n\nHere are examples of well-written SOAP notes from this practice:\n\n${exampleEntries}\n\nMatch this style, tone, and level of detail.`;
+  }
+
   const writerPrompt = clinicalData
     ? `Write a SOAP note from these extracted clinical observations.
 
-${contextLines}${previousNoteSection}
+${contextLines}${previousNoteSection}${examplesSection}
 
 Extracted observations:
 ${clinicalData}
@@ -171,7 +182,7 @@ Write the SOAP note as a JSON object:
 Return ONLY the JSON object.`
     : `Write a SOAP note from this session transcript.
 
-${contextLines}${previousNoteSection}
+${contextLines}${previousNoteSection}${examplesSection}
 
 Session transcript:
 ${transcript}
@@ -181,14 +192,21 @@ Write the SOAP note as a JSON object:
 
 Return ONLY the JSON object.`;
 
+  // Build system prompt with optional clinician style
+  let systemPrompt = SOAP_WRITER_SYSTEM;
+  if (clinicianStyle) {
+    systemPrompt += `\n\nAdditional style instructions for this clinician:\n${clinicianStyle}`;
+  }
+
   const soapMessage = await anthropic.messages.create({
     model: 'claude-sonnet-4-20250514',
     max_tokens: 1024,
-    system: SOAP_WRITER_SYSTEM,
+    system: systemPrompt,
     messages: [{ role: 'user', content: writerPrompt }],
   });
 
   const text = soapMessage.content[0].text.trim();
   const jsonStr = text.replace(/^```json?\n?/, '').replace(/\n?```$/, '');
-  return JSON.parse(jsonStr);
+  const parsed = JSON.parse(jsonStr);
+  return { ...parsed, _promptVersion: PROMPT_VERSION };
 }
